@@ -146,12 +146,12 @@ class ProfilesPanel {
     }
     const { action, dry_run: dryRun, returncode } = detail;
     this.sync = { ...this.sync, running: false, stopping: false, action, dry_run: dryRun, returncode };
-    const what = action === "uninstall" ? "Désinstallation" : dryRun ? "Dry-run" : "Synchronisation";
-    if (returncode === 0) toast("success", "Profils", `${what} terminée.`);
-    else if (returncode === 130) toast("warn", "Profils", `${what} arrêtée.`);
-    else toast("error", "Profils", `${what} incomplète, voir les logs.`);
+    const what = dryRun && action === "sync" ? "Dry-run" : actionLabel(action);
+    if (returncode === 0) toast("success", "Profils", `${what} : terminé.`);
+    else if (returncode === 130) toast("warn", "Profils", `${what} : arrêté.`);
+    else toast("error", "Profils", `${what} : incomplet, voir les logs.`);
     // Modèles ajoutés ou supprimés : listes des nodes mises à jour tout de suite.
-    if (!dryRun) app.refreshComboInNodes?.();
+    if (!dryRun && action !== "sizes") app.refreshComboInNodes?.();
     // États des profils (et détails dépliés) à jour après l'action.
     this.load();
   }
@@ -332,10 +332,11 @@ class ProfilesPanel {
     });
 
     const selection = [...this.selected];
-    const what = this.sync.action === "uninstall" ? "Désinstallation" : "Synchronisation";
+    const what = actionLabel(this.sync.action);
+    const target = (this.sync.profiles || []).join(", ");
     const status = running
-      ? `${what} ${this.sync.stopping ? "en cours d'arrêt" : "en cours"} : ` +
-        `${(this.sync.profiles || []).join(", ")}${this.sync.dry_run ? " (dry-run)" : ""}`
+      ? `${what} ${this.sync.stopping ? "en cours d'arrêt" : "en cours"}` +
+        `${target ? ` : ${target}` : ""}${this.sync.dry_run ? " (dry-run)" : ""}`
       : this.sync.returncode == null ? ""
       : this.sync.returncode === 0 ? `Dernière action (${what.toLowerCase()}) : OK`
       : this.sync.returncode === 130 ? `Dernière action (${what.toLowerCase()}) : arrêtée`
@@ -346,6 +347,11 @@ class ProfilesPanel {
       el("div", { class: "bar" },
         el("button", { onclick: () => this.load() }, "Recharger"),
         el("button", { onclick: () => this.edit(), disabled: running }, "Éditer profiles.json"),
+        el("button", {
+          onclick: () => this.startSync(false, "sizes", []), disabled: running,
+          title: "Interroge Hugging Face / CivitAI / GitHub (sans rien télécharger) pour les " +
+                 "fichiers sans taille, et enregistre la taille de chaque profil dans profiles.json",
+        }, "Recalculer les tailles"),
         el("button", { onclick: () => this.restart(), disabled: running }, "Redémarrer ComfyUI")),
       el("div", { class: "legend" },
         el("span", { class: "installed" }, "installé"),
@@ -381,6 +387,10 @@ class ProfilesPanel {
         el("span", { class: "muted" }, item.kind),
         el("span", { class: "name" }, item.name))));
   }
+}
+
+function actionLabel(action) {
+  return { uninstall: "Désinstallation", sizes: "Calcul des tailles" }[action] || "Synchronisation";
 }
 
 // État d'installation d'un profil (`list --json`) : libellé, et actions permises.

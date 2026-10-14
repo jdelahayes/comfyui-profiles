@@ -1,6 +1,6 @@
 """Panneau « Profils » dans ComfyUI : liste les profils d'utilisation (scripts/profiles.json),
-montre ce qui est déjà installé, lance (ou arrête) une synchronisation ou une désinstallation
-avec ses logs en direct, édite le fichier de profils et redémarre ComfyUI.
+montre ce qui est déjà installé, lance (ou arrête) une synchronisation, une désinstallation ou
+le calcul des tailles avec ses logs en direct, édite le fichier de profils et redémarre ComfyUI.
 
 Aucun node dans le graphe : ce module ne fait qu'ajouter des routes HTTP au serveur ComfyUI et
 un onglet dans la barre latérale (web/profiles.js). Tout le travail est délégué à
@@ -26,12 +26,13 @@ NODE_CLASS_MAPPINGS = {}  # sans ça, ComfyUI ignore le module (et donc WEB_DIRE
 WEB_DIRECTORY = "./web"
 
 SCRIPT = Path(os.environ.get("COMFY_PROFILES_SCRIPT") or Path(__file__).parent / "comfy_profiles.py")
+SIZES_SCRIPT = Path(__file__).parent / "profile_sizes.py"
 IMAGE_CONFIG = Path("/opt/scripts/profiles.json")
 API = "/comfy-profiles"
 EVENT = "comfy-profiles.log"
 PROFILE_NAME = re.compile(r"[\w.-]+")
 MAX_LOG_LINES = 5000
-ACTIONS = ("sync", "uninstall")
+ACTIONS = ("sync", "uninstall", "sizes")
 # Après SIGINT (arrêt propre), délai avant de tuer le script et ses sous-processus.
 STOP_TIMEOUT = 15
 
@@ -132,9 +133,12 @@ class Job:
     async def start(self, action, profiles, dry_run):
         self.action, self.profiles, self.dry_run = action, profiles, dry_run
         self.returncode, self.lines, self.stopping = None, {}, False
-        args = [action, ",".join(profiles)] + (["--dry-run"] if dry_run else [])
+        if action == "sizes":  # tous les profils, écrit les tailles dans le fichier de profils
+            cmd = [SIZES_SCRIPT] + (["--dry-run"] if dry_run else [])
+        else:
+            cmd = [SCRIPT, action, ",".join(profiles)] + (["--dry-run"] if dry_run else [])
         self.proc = await asyncio.create_subprocess_exec(
-            sys.executable, str(SCRIPT), *args,
+            sys.executable, *map(str, cmd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
             # Groupe de processus à part : en dernier recours, on tue aussi git, pip...
@@ -203,7 +207,8 @@ async def sync_start(request):
         return web.json_response({"error": f"action inconnue : {action}"}, status=400)
     if job.running:
         return web.json_response({"error": "une action est déjà en cours"}, status=409)
-    await job.start(action, profile_names(body.get("profiles")), bool(body.get("dry_run")))
+    profiles = [] if action == "sizes" else profile_names(body.get("profiles"))
+    await job.start(action, profiles, bool(body.get("dry_run")))
     return web.json_response(job.state())
 
 

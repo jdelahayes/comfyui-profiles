@@ -11,8 +11,10 @@ qui l'embarque et fournit le `profiles.json` (format et exemples : voir son READ
 ## Contenu
 
 - `comfy_profiles.py` : le gestionnaire de profils, utilisable seul en ligne de commande.
+- `profile_sizes.py` : calcule la taille de chaque profil à la source (Hugging Face, CivitAI,
+  GitHub, URL), sans rien télécharger, et l'enregistre dans le fichier de profils.
 - `__init__.py` : routes HTTP `/comfy-profiles/*` ajoutées au serveur ComfyUI ; elles lancent
-  `comfy_profiles.py` en sous-processus, avec le Python de ComfyUI.
+  `comfy_profiles.py` et `profile_sizes.py` en sous-processus, avec le Python de ComfyUI.
 - `web/profiles.js` : l'onglet de la barre latérale.
 
 Aucun node n'est ajouté au graphe.
@@ -30,6 +32,8 @@ Aucun node n'est ajouté au graphe.
   Une seule action à la fois ; **Arrêter** l'interrompt proprement (le téléchargement ou le
   clone en cours est abandonné sans laisser de fichier incomplet).
 - Édition de `profiles.json`, validée avant d'être enregistrée.
+- **Recalculer les tailles** : lance `profile_sizes.py` sur le fichier de profils (seuls les
+  fichiers sans taille sont interrogés).
 - Redémarrage de ComfyUI (même processus relancé), nécessaire après l'installation de
   nouveaux custom nodes.
 
@@ -43,12 +47,17 @@ comfy_profiles.py [--config FICHIER] list [--json]
 comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
 comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
 comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--dry-run] [--json]
+profile_sizes.py [--config FICHIER] [--env FICHIER] [--force] [--dry-run]
 ```
 
 `sync` installe ce qui manque et ne touche jamais à ce qui est déjà présent. `uninstall`
 supprime les modèles, workflows et custom nodes des profils, `extends` compris, sauf ce qui
 sert encore à un profil gardé (un profil de `COMFY_PROFILES`, ou un autre profil complètement
 installé). Les custom nodes livrés avec l'image et les paquets pip ne sont jamais supprimés.
+
+`profile_sizes.py` n'interroge que les fichiers sans taille (`--force` : tous) et conserve la
+mise en forme du fichier. `--env` reprend `HF_TOKEN` / `CIVITAI_TOKEN` d'un fichier `.env`
+quand ils ne sont pas dans l'environnement.
 
 ## Variables d'environnement
 
