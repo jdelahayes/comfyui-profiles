@@ -788,8 +788,10 @@ def profile_state(profiles, name, paths, memo=None):
     profil (ceux qu'il n'hérite pas déjà d'un parent) : partial si l'un d'eux est présent,
     missing sinon. Un parent installé (ex. comfyui-common, partagé par beaucoup) ne rend donc
     pas « partiels » les profils qui en héritent. Un profil sans élément propre, qui ne fait
-    que regrouper d'autres profils (ex. minimax-h3-all-*), est partial si l'un de ses parents
-    directs est installé ou partiel. empty : n'installe aucun fichier (pip seul, ou seulement
+    que regrouper d'autres profils (ex. minimax-h3-all-*), est jugé sur les éléments de ses
+    parents hors de la base qu'ils ont tous en commun (ex. minimax-h3-common-*) : il est ainsi
+    cohérent avec chacun d'eux. À défaut (un seul parent), il reprend l'état de ses parents
+    directs : partial si l'un d'eux est installé ou partiel. empty : n'installe aucun fichier (pip seul, ou seulement
     des custom nodes hors gestionnaire, voir foreign_node). error : config invalide."""
     memo = {} if memo is None else memo
     if name in memo:
@@ -802,6 +804,13 @@ def profile_state(profiles, name, paths, memo=None):
     except (ConfigError, SystemExit):
         return memo.setdefault(name, "error")
     own = {path: target for path, target in everything.items() if path not in inherited}
+    extends = profiles[name].get("extends", [])
+    if not own and len(extends) > 1:
+        base = set.intersection(*(ancestors(profiles, [p]) for p in extends))
+        shared = set()
+        for parent in base:
+            shared.update(installed_by(resolve(profiles, [parent]), paths))
+        own = {path: target for path, target in everything.items() if path not in shared}
     if not everything:
         state = "empty"
     elif all(installed(path, link) for path, (_, _, link) in everything.items()):
@@ -809,7 +818,7 @@ def profile_state(profiles, name, paths, memo=None):
     elif own:
         state = "partial" if any(present(path, link) for path, (_, _, link) in own.items()) else "missing"
     else:
-        parents = [profile_state(profiles, p, paths, memo) for p in profiles[name].get("extends", [])]
+        parents = [profile_state(profiles, p, paths, memo) for p in extends]
         state = "partial" if any(s in ("installed", "partial") for s in parents) else "missing"
     return memo.setdefault(name, state)
 

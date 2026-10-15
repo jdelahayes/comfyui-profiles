@@ -165,7 +165,8 @@ dans le manifeste à la première utilisation (ce stockage n'est rempli que par 
   `COMFY_PROFILES`. La couleur de fond donne l'état : vert installé (tout est là, `extends`
   compris), orange partiel, neutre non installé. Seuls les éléments propres au profil comptent
   pour « partiel », pas ceux hérités ; un profil qui ne fait que regrouper d'autres profils
-  est partiel si l'un d'eux est installé ou partiel.
+  est jugé sur leurs éléments hors de la base qu'ils ont tous en commun (pour
+  `minimax-h3-all-bf16` : les modèles fl2va et ref2va, pas `minimax-h3-common-bf16`).
 - Boutons par profil : installer (s'il n'est pas complètement installé), désinstaller (s'il
   l'est, même partiellement), prendre en charge (s'il a des éléments non pris en charge),
   détail de ce qui est présent ou non, regroupé par profil qui déclare chaque élément (le
@@ -230,7 +231,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.6 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.7 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
