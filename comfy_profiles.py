@@ -39,6 +39,7 @@ custom nodes sont déjà sur un volume persistant.
 """
 import argparse
 import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -481,6 +482,61 @@ def custom_node_name(item, where):
     return item["git"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
 
 
+def normalize_repo_url(url):
+    """github.com/owner/repo pour https://github.com/Owner/Repo.git, git@github.com:owner/repo..."""
+    url = re.sub(r"^(git\+)?[a-z]+://", "", url.strip().lower())
+    url = re.sub(r"^[^@/]+@([^:/]+):", r"\1/", url)  # git@host:owner/repo
+    url = re.sub(r"^[^@/]+@", "", url).removeprefix("www.")
+    return url.rstrip("/").removesuffix(".git")
+
+
+def node_repo_url(path):
+    """Dépôt d'un custom node : remote origin de son propre .git (pas celui d'un dépôt parent),
+    sinon Repository de son pyproject.toml (node installé depuis le Comfy Registry, sans .git)."""
+    git_config = path / ".git" / "config"
+    if git_config.is_file():
+        match = re.search(r'\[remote "origin"\][^\[]*?^\s*url\s*=\s*(\S+)',
+                          git_config.read_text(errors="replace"), re.M)
+        if match:
+            return match.group(1)
+    pyproject = path / "pyproject.toml"
+    if pyproject.is_file():
+        match = re.search(r'^\s*Repository\s*=\s*"([^"]+)"', pyproject.read_text(errors="replace"),
+                          re.M | re.I)
+        if match:
+            return match.group(1)
+    return None
+
+
+@functools.cache
+def installed_nodes(custom_nodes):
+    """Custom nodes présents, par nom en minuscules et par dépôt (lu une fois par commande,
+    avant toute installation)."""
+    index = {}
+    if custom_nodes.is_dir():
+        for entry in sorted(custom_nodes.iterdir()):
+            if not entry.is_dir() or entry.name.startswith((".", "__")):
+                continue
+            index.setdefault(("name", entry.name.lower()), entry)
+            url = node_repo_url(entry)
+            if url:
+                index.setdefault(("url", normalize_repo_url(url)), entry)
+    return index
+
+
+def installed_elsewhere(name, item, paths):
+    """Le même custom node déjà dans custom_nodes/ sous un autre nom, par exemple installé par
+    ComfyUI-Manager depuis le Comfy Registry (comfyui-kjnodes pour ComfyUI-KJNodes) : même nom à
+    la casse près, ou même dépôt. Laissé tel quel : le cloner une 2e fois le chargerait deux fois."""
+    if (paths.custom_nodes / name).exists() or (paths.custom_nodes_store / name).exists():
+        return None
+    index = installed_nodes(paths.custom_nodes)
+    found = index.get(("name", name.lower()))
+    if not found and item.get("git"):
+        found = index.get(("url", normalize_repo_url(item["git"])))
+    return found
+
+
 def foreign_node(name, paths):
     """Custom node déjà dans custom_nodes/ en vrai dossier alors que le gestionnaire range les
     siens ailleurs (COMFY_PROFILES_NODES_STORE) : livré avec une image Docker ou installé à la
@@ -507,6 +563,11 @@ def plan_custom_node(item, where, paths, manifest):
 
     if foreign_node(name, paths):
         print(f"   [{name}] déjà présent ({link}), hors gestionnaire : version du profil ignorée")
+        return name, steps
+
+    alias = installed_elsewhere(name, item, paths)
+    if alias:
+        print(f"   [{name}] déjà installé sous {alias.name} ({alias}), hors gestionnaire : laissé tel quel")
         return name, steps
 
     ref = item.get("ref")
@@ -576,7 +637,9 @@ def plan_custom_node(item, where, paths, manifest):
                 subprocess.run([sys.executable, "install.py"], cwd=store, check=True)
                 touch(m)
 
-    deps_pending = bool(steps) or any(
+    # Les dépendances d'un node que le gestionnaire n'a pas installé (Manager, à la main...)
+    # restent l'affaire de celui qui l'a installé.
+    deps_pending = bool(steps) or managed and any(
         f.is_file() and not marker(kind, name, f.read_text()).exists()
         for kind, f in (("req", store / "requirements.txt"), ("install", store / "install.py"))
     )
@@ -786,7 +849,12 @@ def installed_by(merged, paths):
     targets = {}
     for profile, item in merged["custom_nodes"]:
         name = custom_node_name(item, f"[{profile}] custom_nodes")
-        if not foreign_node(name, paths):
+        if foreign_node(name, paths):
+            continue
+        alias = installed_elsewhere(name, item, paths)
+        if alias:  # jamais dans le manifeste : compte comme présent, jamais supprimé
+            targets.setdefault(alias, ("custom_node", name, None))
+        else:
             targets.setdefault(paths.custom_nodes_store / name,
                                ("custom_node", name, paths.custom_nodes / name))
     for section in ("models", "workflows"):

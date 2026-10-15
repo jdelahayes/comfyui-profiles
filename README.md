@@ -123,7 +123,14 @@ ignorées et peuvent servir de commentaires.)
 gestionnaire installe lui-même est noté dans `user/__comfy_profiles/installed.json`, et
 `uninstall` ne supprime **que** ces éléments : un modèle copié à la main, un custom node déjà
 là (installé avec le Manager, livré avec une image Docker...) n'est jamais supprimé, ni changé
-de version, même si un profil le cite.
+de version, même si un profil le cite. Ses dépendances Python restent aussi l'affaire de celui
+qui l'a installé.
+
+Un custom node déjà installé **sous un autre nom** est reconnu et laissé tel quel, au lieu d'être
+cloné une seconde fois (ComfyUI le chargerait deux fois) : même nom à la casse près, ou même
+dépôt (remote `origin` de son `.git`, ou `Repository` de son `pyproject.toml`). C'est le cas
+des nodes installés par ComfyUI-Manager depuis le Comfy Registry, rangés sous leur id du
+registry : `comfyui-kjnodes` pour `ComfyUI-KJNodes`.
 
 `uninstall` supprime les modèles, workflows et custom nodes des profils, `extends` compris,
 sauf ce qui sert encore à un profil gardé : un profil de `COMFY_PROFILES`, ou un autre profil
@@ -199,7 +206,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.1 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.2 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
