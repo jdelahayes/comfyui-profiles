@@ -99,6 +99,88 @@ class Paths:
         self.data = self.user / DATA_DIR_NAME
         # Hors des sous-dossiers <type>/ : jamais scanné par ComfyUI.
         self.staging = self.models / ".staging"
+        self.model_folders = model_folders(self)
+
+    def model_path(self, type_, name):
+        """Chemin d'un modèle de type `type_` (ex. loras, diffusion_models/krea2) : là où il est
+        déjà, dans l'un des dossiers que ComfyUI parcourt pour ce type (extra_model_paths.yaml
+        compris), sinon dans le premier de ces dossiers qui porte le nom du type (ex.
+        comfyModels/diffusion_models plutôt que comfyModels/unet), sinon dans le premier."""
+        folder, _, sub = type_.partition("/")
+        bases = [Path(b) for b in self.model_folders.get(LEGACY_FOLDERS.get(folder, folder), [])]
+        default = self.models / type_ / name
+        candidates = [base / sub / name for base in bases]
+        for path in [*candidates, default]:
+            if path.exists() or path.is_symlink():
+                return path
+        preferred = next((b for b in bases if b.name == folder), bases[0] if bases else None)
+        return preferred / sub / name if preferred else default
+
+    def model_roots(self):
+        """Dossiers de modèles de premier niveau (jamais supprimés, même vides)."""
+        return {self.models, *(Path(b) for paths in self.model_folders.values() for b in paths)}
+
+
+# Noms historiques de dossiers de modèles, comme dans ComfyUI (folder_paths.map_legacy).
+LEGACY_FOLDERS = {"unet": "diffusion_models", "clip": "text_encoders"}
+# Dossiers par défaut de ComfyUI qui ne s'appellent pas simplement models/<type>.
+DEFAULT_MODEL_SUBDIRS = {"diffusion_models": ["unet", "diffusion_models"],
+                         "text_encoders": ["text_encoders", "clip"],
+                         "controlnet": ["controlnet", "t2i_adapter"]}
+
+
+def model_folders(paths):
+    """{type: [dossiers, dans l'ordre de ComfyUI]}. Depuis le panneau : la liste du serveur
+    lui-même ($COMFY_MODEL_FOLDERS). En ligne de commande : les dossiers par défaut complétés
+    par <ComfyUI>/extra_model_paths.yaml et $COMFY_EXTRA_MODEL_PATHS (fichiers séparés par
+    « : », comme --extra-model-paths-config), lus comme le fait ComfyUI."""
+    if os.environ.get("COMFY_MODEL_FOLDERS"):
+        return json.loads(os.environ["COMFY_MODEL_FOLDERS"])
+    configs = [paths.comfy_home / "extra_model_paths.yaml",
+               *map(Path, filter(None, os.environ.get("COMFY_EXTRA_MODEL_PATHS", "").split(os.pathsep)))]
+    configs = [c for c in configs if c.is_file()]
+    folders = {}
+    if not configs:
+        return folders
+    try:
+        import yaml
+    except ImportError:
+        print(f"!! pyyaml absent : {', '.join(map(str, configs))} ignoré(s)", file=sys.stderr)
+        return folders
+
+    def add(folder, path, is_default):  # folder_paths.add_model_folder_path
+        folder = LEGACY_FOLDERS.get(folder, folder)
+        known = folders.setdefault(folder, [
+            str(paths.models / d) for d in DEFAULT_MODEL_SUBDIRS.get(folder, [folder])])
+        if path in known:
+            if is_default and known[0] != path:
+                known.remove(path)
+                known.insert(0, path)
+        elif is_default:
+            known.insert(0, path)
+        else:
+            known.append(path)
+
+    for config in configs:  # utils/extra_config.load_extra_path_config
+        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+        yaml_dir = config.resolve().parent
+        for conf in data.values():
+            if not conf:
+                continue
+            conf = dict(conf)
+            base = conf.pop("base_path", None)
+            if base:
+                base = os.path.expandvars(os.path.expanduser(base))
+                base = base if os.path.isabs(base) else os.path.abspath(yaml_dir / base)
+            is_default = conf.pop("is_default", False)
+            for folder, value in conf.items():
+                for line in str(value).split("\n"):
+                    if not line:
+                        continue
+                    full = os.path.join(base, line) if base else (
+                        line if os.path.isabs(line) else os.path.abspath(yaml_dir / line))
+                    add(folder, os.path.normpath(full), is_default)
+    return folders
 
 
 # --- Config -------------------------------------------------------------------------------
@@ -366,7 +448,7 @@ def file_dest(item, where, section, paths):
         return paths.workflows / target_name(item, where)
     if not item.get("type"):
         raise ConfigError(f"{where} : 'type' (sous-dossier, ex: loras) requis")
-    return paths.models / item["type"] / target_name(item, where)
+    return paths.model_path(item["type"], target_name(item, where))
 
 
 def file_label(item, section, dest):
@@ -909,9 +991,10 @@ def remove(path, link, paths):
         shutil.rmtree(path)
     else:
         path.unlink(missing_ok=True)
-    # Sous-dossiers de models/ devenus vides (ex. diffusion_models/krea2).
+    # Sous-dossiers de modèles devenus vides (ex. diffusion_models/krea2).
+    roots = paths.model_roots()
     parent = path.parent
-    while parent != paths.models and paths.models in parent.parents and not any(parent.iterdir()):
+    while parent not in roots and roots & set(parent.parents) and not any(parent.iterdir()):
         parent.rmdir()
         parent = parent.parent
 

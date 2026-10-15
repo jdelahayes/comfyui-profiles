@@ -60,6 +60,12 @@ def cli_env():
         "COMFY_MODELS_DIR": folder_paths.models_dir,
         "COMFY_CUSTOM_NODES_DIR": folder_paths.get_folder_paths("custom_nodes")[0],
         "COMFY_USER_DIR": folder_paths.get_user_directory(),
+        # Dossiers de chaque type de modèle, extra_model_paths.yaml compris, dans l'ordre de
+        # ComfyUI : un modèle est trouvé où que ComfyUI le voie.
+        "COMFY_MODEL_FOLDERS": json.dumps({
+            name: folder_paths.get_folder_paths(name)
+            for name in folder_paths.folder_names_and_paths if name != "custom_nodes"
+        }),
     }
 
 

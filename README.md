@@ -96,9 +96,17 @@ ignorées et peuvent servir de commentaires.)
   `CIVITAI_TOKEN`) ou `url`. Avec `github`, seul le fichier est téléchargé, sans cloner le
   dépôt (Git LFS compris). `name` fixe le nom du fichier local. Il est obligatoire pour
   `civitai` et `url`, et vaut par défaut le nom de `file` pour `hf` et `github`.
-- **Destinations** : modèles dans `models/<type>/`, custom nodes dans `custom_nodes/` (ou dans
-  `COMFY_PROFILES_NODES_STORE`, puis liés dans `custom_nodes/`), workflows dans
+- **Destinations** : modèles dans les dossiers de leur type tels que ComfyUI les voit,
+  `extra_model_paths.yaml` compris (voir ci-dessous) ; custom nodes dans `custom_nodes/` (ou
+  dans `COMFY_PROFILES_NODES_STORE`, puis liés dans `custom_nodes/`) ; workflows dans
   `user/default/workflows/`.
+- **Dossiers de modèles** : un modèle est trouvé dans n'importe lequel des dossiers que ComfyUI
+  parcourt pour son type (ex. `unet/` ou `diffusion_models/`, et ceux de
+  `extra_model_paths.yaml`). S'il manque, il est téléchargé dans le premier de ces dossiers, dans
+  l'ordre de ComfyUI (un chemin `is_default: true` passe donc en tête), en préférant celui qui
+  porte le nom du type : `diffusion_models/` plutôt que `unet/`. Un sous-dossier dans `type`
+  (`diffusion_models/krea2`) fait partie du nom du modèle pour ComfyUI : un fichier rangé
+  ailleurs dans le dossier du type n'est pas reconnu.
 - **Dépendances Python** : le `requirements.txt` et le `install.py` des custom nodes, ainsi que
   les paquets `pip`, sont installés dans l'environnement Python de ComfyUI. Ce qui a été
   installé est noté dans cet environnement : un nouveau conteneur réinstalle les dépendances,
@@ -197,6 +205,8 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 | `COMFY_PROFILES_READONLY` | `1` : panneau en lecture seule | — |
 | `COMFY_HOME` | dossier de ComfyUI (ligne de commande) | le ComfyUI parent de ce dépôt |
 | `COMFY_MODELS_DIR`, `COMFY_CUSTOM_NODES_DIR`, `COMFY_USER_DIR` | chemins de ComfyUI (passés par le panneau) | sous `COMFY_HOME` |
+| `COMFY_MODEL_FOLDERS` | dossiers de chaque type de modèle, en JSON (passés par le panneau) | dossiers par défaut + `extra_model_paths.yaml` |
+| `COMFY_EXTRA_MODEL_PATHS` | autres fichiers `extra_model_paths` (séparés par `:`), comme `--extra-model-paths-config` (ligne de commande) | — |
 | `HF_TOKEN`, `CIVITAI_TOKEN` | téléchargements authentifiés | — |
 | `GDRIVE_ZIP_PASSWORD` | zips chiffrés des custom nodes `gdrive` | — |
 | `COMFY_PROFILES_SCRIPT` | autre `comfy_profiles.py` à utiliser par le panneau | celui de ce dépôt |
@@ -206,7 +216,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.2 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.3 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
