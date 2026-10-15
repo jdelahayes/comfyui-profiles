@@ -50,6 +50,10 @@ const STYLE = `
   border-bottom: 1px solid var(--border-color); }
 .cprof .details .group ~ .item { margin-left: 8px; }
 .cprof .item .name { flex: 1; word-break: break-all; }
+.cprof .item .size { white-space: nowrap; }
+.cprof .item .link { flex: none; width: 16px; text-align: center; color: inherit; opacity: .7;
+  text-decoration: none; }
+.cprof .item a.link:hover { opacity: 1; color: var(--p-primary-color, #6cf); }
 .cprof .ok { color: #3a9a5a; }
 .cprof .todo { color: #e0a030; }
 .cprof .log { background: var(--comfy-input-bg); border: 1px solid var(--border-color);
@@ -533,11 +537,47 @@ class ProfilesPanel {
       el("span", { class: item.missing ? "todo" : "ok" }, item.missing ? "✗" : "✓"),
       el("span", { class: "muted" }, item.kind),
       el("span", { class: "name" }, item.name),
+      FILE_KINDS.has(item.kind) && el("span", {
+        class: "size muted",
+        title: item.size == null ? "Taille inconnue : « Recalculer les tailles » l'interroge à la source" : `${item.size} octets`,
+      }, item.size == null ? "?" : humanSize(item.size)),
       item.unmanaged && el("span", {
         class: "chip unmanaged",
         title: "Présent, mais pas installé par le gestionnaire : la désinstallation le laisse en place",
-      }, "non pris en charge"));
+      }, "non pris en charge"),
+      this.renderLink(item.link));
   }
+
+  renderLink(link) {
+    if (!/^https?:\/\//.test(link?.url || "")) return el("span", { class: "link" });
+    const site = LINK_SITES[link.site] || LINK_SITES.url;
+    return el("a", {
+      class: "link", href: link.url, target: "_blank", rel: "noopener noreferrer",
+      title: `${site.label} : ${link.url}`,
+    }, site.text ?? el("i", { class: site.icon }));
+  }
+}
+
+// Lien vers la source d'un élément : icône PrimeIcons, ou texte quand il n'y en a pas.
+const LINK_SITES = {
+  hf: { label: "Hugging Face", text: "🤗" },
+  github: { label: "GitHub", icon: "pi pi-github" },
+  civitai: { label: "CivitAI", text: "C" },
+  gdrive: { label: "Google Drive", icon: "pi pi-google" },
+  pypi: { label: "PyPI", icon: "pi pi-box" },
+  git: { label: "Dépôt git", icon: "pi pi-code" },
+  url: { label: "Source", icon: "pi pi-external-link" },
+};
+
+// Seuls les fichiers ont une taille déclarée (pas les custom nodes ni les paquets pip).
+const FILE_KINDS = new Set(["model", "workflow"]);
+
+// Même format que human_size() côté Python : « 20,9 Go ».
+function humanSize(size) {
+  for (const [unit, factor] of [["To", 1e12], ["Go", 1e9], ["Mo", 1e6], ["Ko", 1e3]]) {
+    if (size >= factor) return `${(size / factor).toFixed(1).replace(".", ",")} ${unit}`;
+  }
+  return `${size} o`;
 }
 
 function actionLabel(action) {

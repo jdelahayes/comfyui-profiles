@@ -300,6 +300,61 @@ def github_file_url(item):
     return f"https://github.com/{github_repo(item['github'])}/raw/{rev}/{path}"
 
 
+def web_repo_url(url):
+    """Page web d'un dépôt git : https://host/owner/repo pour git@host:owner/repo.git..."""
+    url = re.sub(r"^git\+", "", url.strip())
+    url = re.sub(r"^[^@/:]+@([^:/]+):", r"https://\1/", url)  # git@host:owner/repo
+    return url.rstrip("/").removesuffix(".git")
+
+
+def source_link(item):
+    """(site, URL de la page de la source) d'un modèle, workflow ou custom node, pour le
+    panneau : le dépôt ou le fichier sur Hugging Face ou GitHub, la version sur CivitAI, le
+    fichier sur Google Drive, ou l'URL elle-même. None si on ne sait pas en faire un lien."""
+    if not isinstance(item, dict):
+        return None
+    try:
+        if item.get("hf"):
+            repo = item["hf"].strip("/")
+            if item.get("file"):
+                path = urllib.parse.quote(item["file"].lstrip("/"))
+                return "hf", f"https://huggingface.co/{repo}/blob/{item.get('revision') or 'main'}/{path}"
+            return "hf", f"https://huggingface.co/{repo}"
+        if item.get("github"):
+            repo = github_repo(item["github"])
+            if item.get("file"):
+                path = urllib.parse.quote(item["file"].lstrip("/"))
+                return "github", f"https://github.com/{repo}/blob/{item.get('revision') or 'HEAD'}/{path}"
+            return "github", f"https://github.com/{repo}"
+        if item.get("civitai"):
+            return "civitai", f"https://civitai.com/model-versions/{item['civitai']}"
+        if item.get("gdrive"):
+            return "gdrive", f"https://drive.google.com/file/d/{gdrive_id(item['gdrive'], '')}/view"
+        if item.get("git"):
+            url = web_repo_url(item["git"])
+            if not url.startswith(("https://", "http://")):
+                return None
+            site = "github" if "://github.com/" in url else "git"
+            if item.get("ref") and site == "github":
+                url += f"/tree/{urllib.parse.quote(item['ref'])}"
+            return site, url
+        if item.get("url"):
+            return "url", item["url"]
+    except ConfigError:
+        pass
+    return None
+
+
+def pip_link(spec):
+    """(site, URL) d'un paquet pip : sa page PyPI, ou le dépôt d'une spécification git+URL."""
+    match = re.search(r"(?:git\+)?(https?://[^\s@#]+)", spec)
+    if match:
+        url = web_repo_url(match.group(1))
+        return ("github" if "://github.com/" in url else "url"), url
+    match = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", spec.strip())
+    return ("pypi", f"https://pypi.org/project/{match.group(0)}/") if match else None
+
+
 def target_name(item, where):
     if item.get("name"):
         return item["name"]
@@ -735,7 +790,8 @@ def plan_custom_node(item, where, paths, manifest):
 
 def build_plan(merged, paths, manifest):
     """Retourne (étapes à exécuter, état de chaque élément : (genre, nom, à installer ?, profil
-    qui le déclare)). Un élément déclaré par plusieurs profils revient au premier dans l'ordre
+    qui le déclare, taille déclarée en octets ou None, page de la source ou None : voir
+    source_link)). Un élément déclaré par plusieurs profils revient au premier dans l'ordre
     de resolve(), donc au profil hérité plutôt qu'à celui qui en hérite. Valide toute la config
     avant d'agir."""
     steps, status, seen = [], [], set()
@@ -747,14 +803,14 @@ def build_plan(merged, paths, manifest):
             continue
         seen.add(name)
         steps += node_steps
-        status.append(("custom_node", name, bool(node_steps), profile))
+        status.append(("custom_node", name, bool(node_steps), profile, None, source_link(item)))
 
     specs = {}  # spécification -> premier profil qui la déclare
     for profile, spec in merged["pip"]:
         specs.setdefault(spec, profile)
     missing_specs = [s for s in specs if not marker("pip", "spec", s).exists()]
     for spec, profile in specs.items():
-        status.append(("pip", spec, spec in missing_specs, profile))
+        status.append(("pip", spec, spec in missing_specs, profile, None, pip_link(spec)))
     if missing_specs:
         def install_specs():
             pip_install(missing_specs)
@@ -770,7 +826,10 @@ def build_plan(merged, paths, manifest):
                 continue
             seen.add(dest)
             step = plan_file(item, dest, section[:-1], paths)
-            status.append((section[:-1], file_label(item, section, dest), bool(step), profile))
+            size = item.get("size") if isinstance(item, dict) else None
+            size = size if isinstance(size, int) and not isinstance(size, bool) else None
+            status.append((section[:-1], file_label(item, section, dest), bool(step), profile, size,
+                           source_link(item)))
             if step:
                 steps.append(step)
 
@@ -902,17 +961,19 @@ def cmd_show(profiles, args):
     status = sorted(status, key=lambda st: order.index(st[3]))
     if args.json:
         print_json([{"kind": kind, "name": name, "missing": missing, "profile": profile,
-                     "inherited": profile not in names, "unmanaged": (kind, name) in unmanaged}
-                    for kind, name, missing, profile in status])
+                     "inherited": profile not in names, "unmanaged": (kind, name) in unmanaged,
+                     "size": size, "link": link and {"site": link[0], "url": link[1]}}
+                    for kind, name, missing, profile, size, link in status])
         return
     lines, current = [], None
-    for kind, name, missing, profile in status:
+    for kind, name, missing, profile, size, _ in status:
         if profile != current:
             current = profile
             lines.append(f"[{profile}]" + ("" if profile in names else " (hérité)"))
         todo = "à télécharger" if kind in ("model", "workflow") else "à installer"
         state = todo if missing else "présent, non pris en charge" if (kind, name) in unmanaged else "présent"
-        lines.append(f"  {kind:<12} {name:<40} {state}")
+        shown = (human_size(size) if size is not None else "?") if kind in ("model", "workflow") else ""
+        lines.append(f"  {kind:<12} {name:<40} {shown:>9}  {state}")
     print("\n".join(lines) or "(profil vide)")
 
 

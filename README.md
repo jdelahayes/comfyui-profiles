@@ -170,7 +170,9 @@ dans le manifeste à la première utilisation (ce stockage n'est rempli que par 
 - Boutons par profil : installer (s'il n'est pas complètement installé), désinstaller (s'il
   l'est, même partiellement), prendre en charge (s'il a des éléments non pris en charge),
   détail de ce qui est présent ou non, regroupé par profil qui déclare chaque élément (le
-  profil lui-même, puis chaque profil hérité).
+  profil lui-même, puis chaque profil hérité), avec la taille de chaque fichier (`?` tant
+  qu'elle n'est pas connue : « Recalculer les tailles » l'interroge à la source) et une
+  icône qui ouvre sa source (Hugging Face, GitHub, CivitAI, Google Drive, PyPI ou l'URL).
 - Synchronisation, dry-run ou désinstallation des profils cochés, avec les logs en direct.
   Une seule action à la fois ; **Arrêter** l'interrompt proprement (le téléchargement ou le
   clone en cours est abandonné sans laisser de fichier incomplet).
@@ -231,7 +233,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.7 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.8 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
