@@ -177,11 +177,17 @@ rester telles quelles. Un message absent reste en français.
 - Liste des profils : description, taille, `extends`, badge *démarrage* pour ceux de
   `COMFY_PROFILES`. Pour un profil qui n'est pas entièrement installé, un badge bleu
   *… à télécharger* donne la taille des fichiers absents, que son installation ajouterait
-  (`extends` compris ; les custom nodes et paquets pip ne sont pas comptés). La couleur de fond donne l'état : vert installé (tout est là, `extends`
-  compris), orange partiel, neutre non installé. Seuls les éléments propres au profil comptent
+  (`extends` compris ; les custom nodes et paquets pip ne sont pas comptés). La couleur de
+  fond donne l'état : vert installé (tout est là, `extends` compris), orange partiel, neutre non installé. Seuls les éléments propres au profil comptent
   pour « partiel », pas ceux hérités ; un profil qui ne fait que regrouper d'autres profils
   est jugé sur leurs éléments hors de la base qu'ils ont tous en commun (pour
   `minimax-h3-all-bf16` : les modèles fl2va et ref2va, pas `minimax-h3-common-bf16`).
+- Filtres de la liste, mémorisés dans le navigateur : texte sur le nom des profils et de leurs
+  éléments (`extends` compris), ou sur le nom des profils seulement ; profils finaux seulement
+  (ceux qu'aucun autre profil n'étend), avec en option ceux qu'étend seulement un profil de
+  regroupement (sans élément propre, ex. `minimax-h3-all-*`) ; état, en cliquant sur
+  *installé*, *partiellement installé* ou *non installé* dans la légende (plusieurs à la fois
+  possibles), et *non pris en charge* pour les profils qui ont des éléments non pris en charge. Un profil coché reste affiché.
 - Boutons par profil : installer (s'il n'est pas complètement installé), désinstaller (s'il
   l'est, même partiellement), prendre en charge (s'il a des éléments non pris en charge),
   détail de ce qui est présent ou non, regroupé par profil qui déclare chaque élément (le
@@ -193,7 +199,8 @@ rester telles quelles. Un message absent reste en français.
   clone en cours est abandonné sans laisser de fichier incomplet).
 - Fichier de profils : édition, import (fichier ou URL), export, retour au modèle.
 - **Recalculer les tailles** : lance `profile_sizes.py` sur le fichier de profils (seuls les
-  fichiers sans taille sont interrogés).
+  fichiers sans taille sont interrogés) ; **Tout recalculer** réinterroge aussi ceux dont la
+  taille est connue (`--force`).
 - Redémarrage de ComfyUI, nécessaire après l'installation de nouveaux custom nodes : même
   processus relancé, ou relance par comfy-cli quand ComfyUI tourne sous `comfy launch`.
 
@@ -248,7 +255,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.4.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.4.1 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json

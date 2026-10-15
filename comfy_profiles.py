@@ -974,6 +974,25 @@ def profile_total(profiles, name, paths=None):
     return total, unknown
 
 
+def profile_items(profiles, name):
+    """Noms des éléments d'un profil, extends compris, chacun une fois (pour le filtre du
+    panneau) : custom nodes, paquets pip, « type/fichier » des modèles et workflows."""
+    try:
+        merged = resolve(profiles, [name])
+        names = [custom_node_name(item, f"[{profile}] custom_nodes")
+                 for profile, item in merged["custom_nodes"]]
+        names += [spec for _, spec in merged["pip"]]
+        for section in ("models", "workflows"):
+            for profile, item in merged[section]:
+                where = f"[{profile}] {section}"
+                file = target_name(item, where)
+                names.append(f"{item['type']}/{file}" if section == "models" and item.get("type")
+                             else file)
+    except (ConfigError, SystemExit):
+        return []
+    return list(dict.fromkeys(str(n) for n in names))
+
+
 def safe_total(profiles, name, paths=None):
     try:
         return profile_total(profiles, name, paths)
@@ -1024,6 +1043,7 @@ def cmd_list(profiles, args):
                     # Part de ce total que l'installation du profil ajouterait (fichiers absents).
                     **dict(zip(("todo", "todo_unknown"), safe_total(profiles, name, paths))),
                     "extends": profile.get("extends", []),
+                    "items": profile_items(profiles, name),
                     "counts": {s: len(profile.get(s, [])) for s in SECTIONS},
                     "state": profile_state(profiles, name, paths, states),
                     "unmanaged": count_unmanaged(profiles, name, paths, manifest),

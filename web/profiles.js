@@ -48,6 +48,11 @@ const STYLE = `
 .cprof .actions { display: flex; gap: 3px; }
 .cprof button.primary { background: var(--p-primary-color, #2a6fd6); color: #fff; border-color: transparent; }
 .cprof button.danger { background: #b83a3a; color: #fff; border-color: transparent; }
+.cprof .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.cprof .filter { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.cprof .search { width: 100%; box-sizing: border-box; padding: 4px 6px; border-radius: 4px;
+  border: 1px solid var(--border-color); background: var(--comfy-input-bg); color: var(--input-text); }
+.cprof .match { font-family: monospace; word-break: break-all; }
 .cprof .list { display: flex; flex-direction: column; gap: 4px; }
 .cprof .profile { border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; }
 .cprof .profile.selected { border-color: var(--p-primary-color, #2a6fd6); }
@@ -57,6 +62,11 @@ const STYLE = `
 .cprof .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--descrip-text, #999); }
 .cprof .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px;
   margin-right: 4px; vertical-align: -1px; border-radius: 2px; border: 1px solid var(--border-color); }
+.cprof .legend .state { cursor: pointer; padding: 0 4px; border-radius: 4px; border: 1px solid transparent; }
+.cprof .legend .state:hover { color: var(--input-text); }
+.cprof .legend .chip.state { border-radius: 8px; border-color: #e0a030; }
+.cprof .legend .chip.state.active { border-style: solid; border-color: var(--p-primary-color, #2a6fd6); }
+.cprof .legend .state.active { color: var(--input-text); border-color: var(--p-primary-color, #2a6fd6); }
 .cprof .legend .installed::before { background: rgba(58, 154, 90, .5); }
 .cprof .legend .partial::before { background: rgba(224, 160, 48, .5); }
 .cprof .head { display: flex; gap: 8px; align-items: center; }
@@ -122,6 +132,17 @@ class ProfilesPanel {
     this.data = null;          // résultat de `list --json`
     this.selected = new Set();
     this.expanded = new Map();  // profil -> état (`show --json`), ou null pendant le chargement
+    this.leavesOnly = loadSetting(LEAVES_KEY) === "1";  // seulement les profils au bout de l'arbre
+    this.namesOnly = loadSetting(NAMES_KEY) === "1";    // filtre texte sur le nom des profils seul
+    this.grouped = loadSetting(GROUPED_KEY) === "1";    // profils finaux : aussi ceux d'un regroupement
+    // Filtre sur l'état (clés de STATE_FILTERS) ; vide : tous les profils.
+    this.states = new Set((loadSetting(STATES_KEY) || "").split(",").filter((k) => k in STATE_FILTERS));
+    this.unmanagedOnly = loadSetting(UNMANAGED_KEY) === "1";  // profils avec des éléments non pris en charge
+    // Filtre texte : un seul champ, gardé d'un rendu à l'autre (voir render()).
+    this.search = el("input", {
+      type: "search", class: "search", placeholder: t("Filtrer : profil ou élément (modèle, custom node…)"),
+      oninput: () => this.render(),
+    });
     this.sync = { running: false };
     this.logLines = new Map();  // index -> élément
     this.editing = null;        // { path, source, writable, text } en mode édition
@@ -207,10 +228,11 @@ class ProfilesPanel {
     if (this.expanded.has(name)) this.render();
   }
 
-  async startSync(dryRun, action = "sync", profiles = [...this.selected], withExtends = false) {
+  // force (action « sizes ») : réinterroge aussi les fichiers dont la taille est connue.
+  async startSync(dryRun, action = "sync", profiles = [...this.selected], withExtends = false, force = false) {
     try {
       this.setSync(await request("POST", "/sync",
-        { action, profiles, dry_run: dryRun, with_extends: withExtends }));
+        { action, profiles, dry_run: dryRun, with_extends: withExtends, force }));
     } catch (e) {
       toast("error", t("Profils"), e.message);
     }
@@ -352,9 +374,30 @@ class ProfilesPanel {
     }
   }
 
+  // Case à cocher d'un filtre, mémorisée dans ce navigateur.
+  toggle(prop, key, label, title) {
+    return el("label", { class: "muted filter", title },
+      el("input", {
+        type: "checkbox", checked: this[prop],
+        onchange: (e) => {
+          this[prop] = e.target.checked;
+          saveSetting(key, this[prop] ? "1" : "0");
+          this.render();
+        },
+      }),
+      label);
+  }
+
   render() {
+    // Le rendu reconstruit tout le panneau : on rend au champ de filtre le focus et le curseur.
+    const focused = document.activeElement === this.search;
+    const { selectionStart, selectionEnd } = this.search;
     this.root.replaceChildren(
       this.editing ? this.renderEditor() : this.uninstall ? this.renderUninstall() : this.renderMain());
+    if (focused && this.search.isConnected) {
+      this.search.focus();
+      this.search.setSelectionRange(selectionStart, selectionEnd);
+    }
   }
 
   renderUninstall() {
@@ -431,7 +474,29 @@ class ProfilesPanel {
     }
     const locked = running || this.data.readonly;
 
-    const profiles = Object.entries(this.data.profiles).map(([name, p]) => {
+    // Profils au bout de l'arbre des dépendances : aucun autre profil ne les étend. Avec
+    // this.grouped, un profil étendu seulement par des profils de regroupement (ex.
+    // minimax-h3-all-*) compte aussi comme final. Un profil sélectionné reste affiché, pour ne
+    // pas agir sur une sélection invisible.
+    const parents = new Set(Object.values(this.data.profiles)
+      .filter((p) => !(this.grouped && isGroup(p))).flatMap((p) => p.extends));
+    const entries = Object.entries(this.data.profiles);
+    // Filtre texte : nom du profil, sinon noms de ses éléments (extends compris).
+    const query = this.search.value.trim().toLowerCase();
+    const matches = new Map();  // profil -> éléments qui correspondent ([] : le nom correspond)
+    for (const [name, p] of entries) {
+      if (!query || name.toLowerCase().includes(query)) matches.set(name, []);
+      else {
+        const items = this.namesOnly ? [] : (p.items || []).filter((i) => i.toLowerCase().includes(query));
+        if (items.length) matches.set(name, items);
+      }
+    }
+    const states = new Set([...this.states].flatMap((k) => STATE_FILTERS[k]));
+    const shown = entries.filter(([name, p]) => this.selected.has(name) ||
+      (matches.has(name) && (!this.leavesOnly || !parents.has(name)) && (!states.size || states.has(p.state)) &&
+      (!this.unmanagedOnly || p.unmanaged > 0)));
+    const hidden = entries.length - shown.length;
+    const profiles = shown.map(([name, p]) => {
       const detail = this.expanded.get(name);
       const state = STATES[p.state] || STATES.missing;
       const label = t(state.label);
@@ -478,6 +543,9 @@ class ProfilesPanel {
           }, t("{n} non pris en charge", { n: p.unmanaged }))),
         p.description && el("div", { class: "muted" }, p.description),
         p.extends.length > 0 && el("div", { class: "muted" }, `extends : ${p.extends.join(", ")}`),
+        matches.get(name)?.length > 0 && el("div", { class: "muted match" },
+          t("Contient : {items}", { items: matches.get(name).slice(0, 3).join(", ") +
+            (matches.get(name).length > 3 ? ` (+${matches.get(name).length - 3})` : "") })),
         this.expanded.has(name) && this.renderDetail(detail));
     });
 
@@ -502,13 +570,48 @@ class ProfilesPanel {
           title: t("Interroge Hugging Face / CivitAI / GitHub (sans rien télécharger) pour les " +
                    "fichiers sans taille, et enregistre la taille de chaque profil dans profiles.json"),
         }, t("Recalculer les tailles")),
+        el("button", {
+          disabled: locked,
+          onclick: () => confirm(t("Réinterroger la source de tous les fichiers, même ceux dont la taille " +
+                                   "est déjà connue ? Cela peut prendre un moment.")) &&
+            this.startSync(false, "sizes", [], false, true),
+          title: t("Comme « Recalculer les tailles », mais réinterroge aussi les fichiers dont la taille " +
+                   "est déjà connue (après un changement de fichier à la source)"),
+        }, t("Tout recalculer")),
         el("button", { onclick: () => this.restart(), disabled: locked }, t("Redémarrer ComfyUI"))),
       this.configBar(locked, this.data),
       el("div", { class: "legend" },
-        el("span", { class: "installed" }, t("installé")),
-        el("span", { class: "partial" }, t("partiellement installé")),
-        el("span", {}, t("non installé")),
-        el("span", { class: "chip unmanaged", title: t(UNMANAGED_HINT) }, t("non pris en charge"))),
+        // Chaque état est aussi un filtre : un clic l'ajoute ou le retire (plusieurs possibles).
+        Object.entries(STATE_FILTERS).map(([key]) => el("span", {
+          class: `state ${key}${this.states.has(key) ? " active" : ""}`,
+          title: this.states.has(key) ? t("Cliquer pour ne plus filtrer sur cet état")
+            : t("Cliquer pour n'afficher que les profils dans cet état"),
+          onclick: () => {
+            this.states.has(key) ? this.states.delete(key) : this.states.add(key);
+            saveSetting(STATES_KEY, [...this.states].join(","));
+            this.render();
+          },
+        }, t({ installed: "installé", partial: "partiellement installé", missing: "non installé" }[key]))),
+        el("span", {
+          class: `chip unmanaged state${this.unmanagedOnly ? " active" : ""}`,
+          title: `${t(UNMANAGED_HINT)}\n` + (this.unmanagedOnly ? t("Cliquer pour ne plus filtrer sur cet état")
+            : t("Cliquer pour n'afficher que les profils avec des éléments non pris en charge")),
+          onclick: () => {
+            this.unmanagedOnly = !this.unmanagedOnly;
+            saveSetting(UNMANAGED_KEY, this.unmanagedOnly ? "1" : "0");
+            this.render();
+          },
+        }, t("non pris en charge"))),
+      this.search,
+      el("div", { class: "filters" },
+        this.toggle("namesOnly", NAMES_KEY, t("Chercher dans le nom des profils seulement"),
+          t("Le filtre texte ne cherche pas dans les éléments des profils (modèles, custom nodes…)")),
+        this.toggle("leavesOnly", LEAVES_KEY, t("Afficher seulement les profils finaux"),
+          t("Masque les profils étendus par d'autres (ex. les profils *-common), installés avec eux")),
+        this.leavesOnly && this.toggle("grouped", GROUPED_KEY, t("Afficher aussi les profils regroupés"),
+          t("Affiche aussi les profils finaux étendus par un profil de regroupement (sans élément propre, " +
+            "qui ne fait que réunir d'autres profils, ex. minimax-h3-all-*)")),
+        hidden > 0 && el("span", { class: "muted" }, t("({n} masqué(s))", { n: hidden }))),
       el("div", { class: "list" }, profiles),
       el("div", { class: "bar" },
         el("button", { class: "primary", disabled: locked || !selection.length,
@@ -630,6 +733,33 @@ function todoSize(p) {
   if (!p.todo && !p.todo_unknown) return "";
   const size = t("{size} à télécharger", { size: humanSize(p.todo || 0) });
   return p.todo_unknown ? `${size} ${t("+ {n} fichier(s) de taille inconnue", { n: p.todo_unknown })}` : size;
+}
+
+// Réglages du panneau propres à ce navigateur ; le stockage peut être indisponible.
+const LEAVES_KEY = "comfy-profiles.leavesOnly";
+const NAMES_KEY = "comfy-profiles.namesOnly";
+const GROUPED_KEY = "comfy-profiles.grouped";
+const STATES_KEY = "comfy-profiles.states";
+const UNMANAGED_KEY = "comfy-profiles.unmanagedOnly";
+
+// Filtres d'état de la légende -> états des profils (`list --json`) qu'ils affichent.
+const STATE_FILTERS = {
+  installed: ["installed"],
+  partial: ["partial"],
+  missing: ["missing", "empty"],
+};
+
+// Profil de regroupement : aucun élément propre, il ne fait que réunir d'autres profils.
+function isGroup(p) {
+  return p.extends.length > 1 && Object.values(p.counts).every((n) => n === 0);
+}
+
+function loadSetting(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function saveSetting(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* réglage simplement non mémorisé */ }
 }
 
 function actionLabel(action) {

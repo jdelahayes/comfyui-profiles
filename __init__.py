@@ -218,11 +218,12 @@ class Job:
             del self.lines[old]
         PromptServer.instance.send_sync(EVENT, {"index": index, "text": text})
 
-    async def start(self, action, profiles, dry_run, with_extends=False, lang=None):
+    async def start(self, action, profiles, dry_run, with_extends=False, lang=None, force=False):
         self.action, self.profiles, self.dry_run = action, profiles, dry_run
         self.returncode, self.lines, self.stopping = None, {}, False
         if action == "sizes":  # tous les profils, écrit les tailles dans le fichier de profils
-            cmd = [SIZES_SCRIPT] + (["--dry-run"] if dry_run else [])
+            # force : réinterroge aussi les fichiers dont la taille est déjà connue.
+            cmd = [SIZES_SCRIPT] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
         else:
             cmd = [SCRIPT, action, ",".join(profiles)] + (["--dry-run"] if dry_run else [])
             if action == "uninstall" and with_extends:
@@ -302,7 +303,8 @@ async def sync_start(request):
     if READONLY and not (dry_run and action != "sizes"):
         return json_error(403, _("panneau en lecture seule (COMFY_PROFILES_READONLY) : dry-run seulement"))
     profiles = [] if action == "sizes" else profile_names(body.get("profiles"), request)
-    await job.start(action, profiles, dry_run, bool(body.get("with_extends")), request_lang(request))
+    await job.start(action, profiles, dry_run, bool(body.get("with_extends")), request_lang(request),
+                    force=bool(body.get("force")))
     return web.json_response(job.state())
 
 

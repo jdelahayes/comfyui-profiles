@@ -228,5 +228,20 @@
   "__doc__:profile_sizes": "Computes the size of usage profiles and saves it in the profiles file.\n\nQueries the actual size of each file (models, workflows) at its source, without downloading\nanything: Hugging Face API (paths-info), CivitAI API (model-versions), or the Content-Length\nheader for a direct URL or a file in a GitHub repository. Only files without \"size\" are\nqueried, unless --force queries them all again. Then writes in the config:\n  - \"size\" (bytes) on each file;\n  - \"size\" (human-readable, e.g. \"89.4 GB\") on each profile: total of its files, extends\n    included, each file counted once. Custom nodes and pip packages are not counted (a profile\n    with only those has no size).\n\nUsage:\n  profile_sizes.py [--config FILE] [--env FILE] [--force] [--dry-run]\n\nConfig file: same rule as comfy_profiles.py (--config, $COMFY_PROFILES_CONFIG, the user's file,\nthe template). When it is the template (read-only), the result is written to the user's file\n(<user>/__comfy_profiles/profiles.json), which then takes over.\nHugging Face token (gated repositories): $HF_TOKEN, otherwise the one in the --env file (a\ndeployment .env for instance), otherwise the one from `hf auth login`. CivitAI token:\n$CIVITAI_TOKEN, otherwise the one in the --env file.\nThe file's layout (one file per line, blank lines between profiles) is preserved.\nAlso run by the “Recalculate sizes” button of the Profiles panel.\n",
   "Taille totale des fichiers du profil, extends compris": "Total size of the profile's files, extends included",
   "Fichiers absents, que l'installation du profil ajouterait (custom nodes et paquets pip non comptés)": "Missing files that installing the profile would add (custom nodes and pip packages not counted)",
-  "{size} à télécharger": "{size} to download"
+  "{size} à télécharger": "{size} to download",
+  "Masque les profils étendus par d'autres (ex. les profils *-common), installés avec eux": "Hides profiles extended by others (e.g. the *-common profiles), installed along with them",
+  "({n} masqué(s))": "({n} hidden)",
+  "Filtrer : profil ou élément (modèle, custom node…)": "Filter: profile or item (model, custom node…)",
+  "Contient : {items}": "Contains: {items}",
+  "Le filtre texte ne cherche pas dans les éléments des profils (modèles, custom nodes…)": "The text filter does not search the profiles' items (models, custom nodes…)",
+  "Chercher dans le nom des profils seulement": "Search in profile names only",
+  "Afficher seulement les profils finaux": "Show final profiles only",
+  "Afficher aussi les profils regroupés": "Also show grouped profiles",
+  "Affiche aussi les profils finaux étendus par un profil de regroupement (sans élément propre, qui ne fait que réunir d'autres profils, ex. minimax-h3-all-*)": "Also shows final profiles extended by a group profile (one with no items of its own that only combines other profiles, e.g. minimax-h3-all-*)",
+  "Tout recalculer": "Recalculate all",
+  "Réinterroger la source de tous les fichiers, même ceux dont la taille est déjà connue ? Cela peut prendre un moment.": "Query the source of every file again, even those whose size is already known? This may take a while.",
+  "Comme « Recalculer les tailles », mais réinterroge aussi les fichiers dont la taille est déjà connue (après un changement de fichier à la source)": "Like “Recalculate sizes”, but also queries the files whose size is already known again (after a file changed at the source)",
+  "Cliquer pour ne plus filtrer sur cet état": "Click to stop filtering on this state",
+  "Cliquer pour n'afficher que les profils dans cet état": "Click to show only the profiles in this state",
+  "Cliquer pour n'afficher que les profils avec des éléments non pris en charge": "Click to show only the profiles with unmanaged items"
 }
