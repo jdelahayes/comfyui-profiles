@@ -220,3 +220,7 @@ ENV COMFY_PROFILES_SEED=/opt/profiles.json
 workflow **Publish to Comfy registry** (manuel) publie la version de `pyproject.toml` ; il faut
 un publisher sur le registry (`PublisherId`) et son token dans le secret
 `REGISTRY_ACCESS_TOKEN`. Penser à aligner `version` sur le tag git.
+
+## Licence
+
+MIT, voir [LICENSE](LICENSE).
