@@ -33,6 +33,7 @@ import urllib.request
 from pathlib import Path
 
 import comfy_profiles as cp
+from profiles_i18n import doc, human_size, t
 
 FILE_SECTIONS = ("models", "workflows")
 TOKEN_KEYS = ("HF_TOKEN", "CIVITAI_TOKEN")
@@ -44,7 +45,7 @@ def load_env_tokens(env_file):
         return
     env_file = Path(env_file)
     if not env_file.is_file():
-        sys.exit(f"!! Fichier --env introuvable : {env_file}")
+        sys.exit("!! " + t("Fichier --env introuvable : {path}", path=env_file))
     for line in env_file.read_text().splitlines():
         key, sep, value = line.strip().partition("=")
         key, value = key.strip(), value.strip()
@@ -92,7 +93,7 @@ def civitai_size(version_id):
     files = data.get("files") or []
     primary = next((f for f in files if f.get("primary")), files[0] if files else None)
     if not primary or primary.get("sizeKB") is None:
-        raise LookupError("aucun fichier dans la version")
+        raise LookupError(t("aucun fichier dans la version"))
     return round(primary["sizeKB"] * 1024)
 
 
@@ -101,13 +102,13 @@ def url_size(url):
     with urllib.request.urlopen(req, timeout=30) as resp:
         length = resp.headers.get("Content-Length")
     if length is None:
-        raise LookupError("pas d'en-tête Content-Length")
+        raise LookupError(t("pas d'en-tête Content-Length"))
     return int(length)
 
 
 def error_text(e):
     if isinstance(e, urllib.error.HTTPError):
-        hint = " (dépôt gated/privé : HF_TOKEN requis, licence acceptée ?)" if e.code in (401, 403) else ""
+        hint = " " + t("(dépôt gated/privé : HF_TOKEN requis, licence acceptée ?)") if e.code in (401, 403) else ""
         return f"HTTP {e.code}{hint}"
     return str(e)
 
@@ -137,7 +138,7 @@ def fetch_sizes(items):
             continue
         for where, item in group:
             if sizes.get(item["file"]) is None:
-                failures.append(f"{where} {cp.describe_source(item)} : fichier introuvable dans le dépôt")
+                failures.append(f"{where} {cp.describe_source(item)} : " + t("fichier introuvable dans le dépôt"))
             else:
                 item["size"] = sizes[item["file"]]
     return failures
@@ -145,28 +146,9 @@ def fetch_sizes(items):
 
 # --- Totaux par profil --------------------------------------------------------------------
 
-def human_size(size):
-    for unit, factor in (("To", 1e12), ("Go", 1e9), ("Mo", 1e6), ("Ko", 1e3)):
-        if size >= factor:
-            return f"{size / factor:.1f} {unit}".replace(".", ",")
-    return f"{size} o"
-
-
-def profile_total(profiles, name):
-    """(total en octets, nb de fichiers de taille inconnue), extends compris, sans doublon."""
-    merged = cp.resolve(profiles, [name])
-    total, unknown, seen = 0, 0, set()
-    for section in FILE_SECTIONS:
-        for profile, item in merged[section]:
-            key = (section, item.get("type"), cp.target_name(item, f"[{profile}] {section}"))
-            if key in seen:
-                continue
-            seen.add(key)
-            if isinstance(item.get("size"), int):
-                total += item["size"]
-            else:
-                unknown += 1
-    return total, unknown
+def profile_size_text(total, unknown):
+    text = human_size(total)
+    return text + " " + t("+ {n} fichier(s) de taille inconnue", n=unknown) if unknown else text
 
 
 # --- Écriture (mise en forme conservée) ---------------------------------------------------
@@ -222,18 +204,18 @@ def with_profile_size(profile, size):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        description=doc(__doc__, "profile_sizes"), formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--config", help="fichier de profils à mettre à jour")
-    parser.add_argument("--env", help="fichier .env d'où reprendre HF_TOKEN / CIVITAI_TOKEN")
+    parser.add_argument("--config", help=t("fichier de profils à mettre à jour"))
+    parser.add_argument("--env", help=t("fichier .env d'où reprendre HF_TOKEN / CIVITAI_TOKEN"))
     parser.add_argument("--force", action="store_true",
-                        help="réinterroge aussi les fichiers dont la taille est déjà connue")
-    parser.add_argument("--dry-run", action="store_true", help="affiche les tailles sans écrire le fichier")
+                        help=t("réinterroge aussi les fichiers dont la taille est déjà connue"))
+    parser.add_argument("--dry-run", action="store_true", help=t("affiche les tailles sans écrire le fichier"))
     args = parser.parse_args()
 
     load_env_tokens(args.env)
     path, source = cp.config_source(args.config)
-    print(f">> Config : {path}")
+    print(">> " + t("Config : {path}", path=path))
     profiles = cp.load_profiles(path, source)
     text = path.read_text()
     data = json.loads(text)
@@ -246,34 +228,35 @@ def main():
         for item in profile.get(section, [])
         if args.force or not isinstance(item.get("size"), int)
     ]
-    print(f">> {len(items)} taille(s) à récupérer" + (" (--force)" if args.force else ""))
+    print(">> " + t("{n} taille(s) à récupérer", n=len(items)) + (" (--force)" if args.force else ""))
     try:
         failures = fetch_sizes(items)
     except cp.ConfigError as e:
         sys.exit(f"!! {e}")
 
     for name in list(profiles):
-        total, unknown = profile_total(profiles, name)
+        total, unknown = cp.profile_total(profiles, name)
         if not total and not unknown:  # que des custom nodes / paquets pip
             profiles[name].pop("size", None)
             continue
-        size = human_size(total) + (f" + {unknown} fichier(s) de taille inconnue" if unknown else "")
+        size = profile_size_text(total, unknown)
         profiles[name] = with_profile_size(profiles[name], size)
         print(f"   {name:<24} {size}")
 
     if failures:
-        print(f"!! {len(failures)} taille(s) introuvable(s) :", file=sys.stderr)
+        print("!! " + t("{n} taille(s) introuvable(s) :", n=len(failures)), file=sys.stderr)
         for failure in failures:
             print(f"   - {failure}", file=sys.stderr)
 
     if args.dry_run:
-        print(">> --dry-run : fichier non modifié.")
+        print(">> " + t("--dry-run : fichier non modifié."))
     else:
         blank_before = set(re.findall(r'\n[ \t]*\n[ \t]*"([^"]+)"\s*:\s*\{', text))
         out = cp.writable_config(path, source)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(format_config(data, blank_before), newline="\n")
-        print(f">> {out} mis à jour." if out == path else f">> {out} créé (le modèle {path} reste tel quel).")
+        print(">> " + (t("{path} mis à jour.", path=out) if out == path
+                       else t("{path} créé (le modèle {seed} reste tel quel).", path=out, seed=path)))
     return 1 if failures else 0
 
 
@@ -281,5 +264,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:  # bouton Arrêter du panneau : le fichier n'est écrit qu'à la fin
-        print("!! Calcul des tailles interrompu, fichier non modifié.", file=sys.stderr)
+        print("!! " + t("Calcul des tailles interrompu, fichier non modifié."), file=sys.stderr)
         sys.exit(130)

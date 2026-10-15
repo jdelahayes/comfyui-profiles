@@ -14,6 +14,9 @@ façon dont ComfyUI a été lancé (--base-directory, --user-directory...).
 
 COMFY_PROFILES_READONLY=1 : panneau en lecture seule (ni installation, ni désinstallation, ni
 modification du fichier de profils, ni redémarrage ; le dry-run reste possible).
+
+Langue : le panneau envoie celle de ComfyUI dans l'en-tête Comfy-Profiles-Lang ; les messages
+d'erreur des routes et ceux du script (COMFY_PROFILES_LANG) suivent. Voir profiles_i18n.py.
 """
 import asyncio
 import codecs
@@ -31,6 +34,8 @@ import folder_paths
 from aiohttp import web
 from server import PromptServer
 
+from . import profiles_i18n as i18n
+
 NODE_CLASS_MAPPINGS = {}  # sans ça, ComfyUI ignore le module (et donc WEB_DIRECTORY)
 WEB_DIRECTORY = "./web"
 
@@ -47,14 +52,28 @@ STOP_TIMEOUT = 15
 MAX_CONFIG_BYTES = 5 * 1024 * 1024
 READONLY = os.environ.get("COMFY_PROFILES_READONLY", "").lower() in ("1", "true", "yes")
 
+LANG_HEADER = "Comfy-Profiles-Lang"
+
 routes = PromptServer.instance.routes
 log = logging.getLogger("comfy-profiles")
+t = i18n.t  # messages du serveur (logs) : langue de l'environnement
 
 
-def cli_env():
-    """Environnement des scripts : les chemins de ce ComfyUI, tels que le serveur les voit."""
+def request_lang(request):
+    """Langue du panneau qui fait la requête, sinon celle de l'environnement."""
+    return i18n.normalize(request.headers.get(LANG_HEADER)) or i18n.detect()
+
+
+def tr(request):
+    return i18n.translator(request_lang(request))
+
+
+def cli_env(lang=None):
+    """Environnement des scripts : les chemins de ce ComfyUI, tels que le serveur les voit, et
+    la langue des messages."""
     return {
         **os.environ,
+        **({"COMFY_PROFILES_LANG": lang} if lang else {}),
         "PYTHONUNBUFFERED": "1",
         "COMFY_HOME": folder_paths.base_path,
         "COMFY_MODELS_DIR": folder_paths.models_dir,
@@ -73,68 +92,80 @@ def json_error(status, message):
     return web.json_response({"error": message}, status=status)
 
 
+def bad_request(message):
+    return web.HTTPBadRequest(text=json.dumps({"error": message}), content_type="application/json")
+
+
 def writes(handler):
     """Route qui modifie l'installation ou le fichier de profils : refusée en lecture seule."""
     @functools.wraps(handler)
     async def guarded(request):
         if READONLY:
-            return json_error(403, "panneau en lecture seule (COMFY_PROFILES_READONLY)")
+            return json_error(403, tr(request)("panneau en lecture seule (COMFY_PROFILES_READONLY)"))
         return await handler(request)
     return guarded
 
 
-async def run_cli(*args, config=None):
+async def run_cli(*args, config=None, lang=None):
     cmd = [sys.executable, str(SCRIPT)]
     if config:
         cmd += ["--config", str(config)]
     proc = await asyncio.create_subprocess_exec(
-        *cmd, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env())
+        *cmd, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env(lang))
     out, err = await proc.communicate()
     return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
-def cli_error(stderr):
+def cli_error(stderr, translate=t):
     """Message d'erreur du script : ses lignes « !! ... », sinon la fin de stderr."""
     lines = [l.strip() for l in stderr.splitlines() if l.strip()]
     errors = [l.removeprefix("!!").strip() for l in lines if l.startswith("!!")]
-    return "\n".join(errors or lines[-5:]) or "erreur inconnue"
+    return "\n".join(errors or lines[-5:]) or translate("erreur inconnue")
 
 
-async def cli_json(*args, config=None):
-    code, out, err = await run_cli(*args, "--json", config=config)
+async def cli_json(*args, request, config=None):
+    """Lance le script avec --json, dans la langue du panneau qui fait la requête."""
+    lang = request_lang(request)
+    code, out, err = await run_cli(*args, "--json", config=config, lang=lang)
     if code != 0:
-        raise web.HTTPBadRequest(text=json.dumps({"error": cli_error(err)}),
-                                 content_type="application/json")
+        raise bad_request(cli_error(err, i18n.translator(lang)))
     return json.loads(out)
 
 
-def profile_names(value):
+def profile_names(value, request):
     names = value if isinstance(value, list) else str(value or "").split(",")
     names = [n.strip() for n in names if n.strip()]
     if not names or not all(PROFILE_NAME.fullmatch(n) for n in names):
-        raise web.HTTPBadRequest(text=json.dumps({"error": "noms de profils invalides"}),
-                                 content_type="application/json")
+        raise bad_request(tr(request)("noms de profils invalides"))
     return names
 
 
 # --- Lecture ------------------------------------------------------------------------------
 
+@routes.get(f"{API}/lang/{{code}}")
+async def lang_catalog(request):
+    """Traductions pour le panneau : {message français: traduction} ({} pour le français)."""
+    code = i18n.normalize(request.match_info["code"]) or i18n.DEFAULT_LANG
+    messages = {k: v for k, v in i18n.catalog(code).items() if not k.startswith("__doc__:")}
+    return web.json_response({"lang": code, "messages": messages})
+
+
 @routes.get(f"{API}/profiles")
-async def list_profiles(_request):
-    return web.json_response({**await cli_json("list"), "readonly": READONLY})
+async def list_profiles(request):
+    return web.json_response({**await cli_json("list", request=request), "readonly": READONLY})
 
 
 @routes.get(f"{API}/status")
 async def profile_status(request):
-    names = profile_names(request.query.get("profiles"))
-    return web.json_response(await cli_json("show", ",".join(names)))
+    names = profile_names(request.query.get("profiles"), request)
+    return web.json_response(await cli_json("show", ",".join(names), request=request))
 
 
 @routes.get(f"{API}/uninstall-plan")
 async def uninstall_plan(request):
-    names = profile_names(request.query.get("profiles"))
+    names = profile_names(request.query.get("profiles"), request)
     extends = ["--with-extends"] if request.query.get("with_extends") in ("1", "true") else []
-    return web.json_response(await cli_json("uninstall", ",".join(names), *extends))
+    return web.json_response(await cli_json("uninstall", ",".join(names), *extends, request=request))
 
 
 @routes.post(f"{API}/adopt")
@@ -142,10 +173,11 @@ async def uninstall_plan(request):
 async def adopt(request):
     """Prend en charge ce qui est déjà présent pour des profils (voir comfy_profiles.cmd_adopt)."""
     if job.running:
-        return json_error(409, "une action est déjà en cours")
-    names = profile_names((await request.json()).get("profiles"))
-    result = await cli_json("adopt", ",".join(names))
-    log.info("[comfy-profiles] %s : %d élément(s) pris en charge", ",".join(names), len(result["adopted"]))
+        return json_error(409, tr(request)("une action est déjà en cours"))
+    names = profile_names((await request.json()).get("profiles"), request)
+    result = await cli_json("adopt", ",".join(names), request=request)
+    log.info("[comfy-profiles] %s", t("{names} : {n} élément(s) pris en charge",
+                                      names=",".join(names), n=len(result["adopted"])))
     return web.json_response(result)
 
 
@@ -186,7 +218,7 @@ class Job:
             del self.lines[old]
         PromptServer.instance.send_sync(EVENT, {"index": index, "text": text})
 
-    async def start(self, action, profiles, dry_run, with_extends=False):
+    async def start(self, action, profiles, dry_run, with_extends=False, lang=None):
         self.action, self.profiles, self.dry_run = action, profiles, dry_run
         self.returncode, self.lines, self.stopping = None, {}, False
         if action == "sizes":  # tous les profils, écrit les tailles dans le fichier de profils
@@ -198,7 +230,7 @@ class Job:
         self.proc = await asyncio.create_subprocess_exec(
             sys.executable, *map(str, cmd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            env=cli_env(),
+            env=cli_env(lang),
             # Groupe de processus à part : en dernier recours, on tue aussi git, pip...
             start_new_session=True)
         asyncio.create_task(self.pump())
@@ -214,7 +246,7 @@ class Job:
         try:
             await asyncio.wait_for(proc.wait(), STOP_TIMEOUT)
         except asyncio.TimeoutError:
-            log.warning("[comfy-profiles] arrêt propre trop long, processus tués")
+            log.warning("[comfy-profiles] %s", t("arrêt propre trop long, processus tués"))
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -259,24 +291,25 @@ async def sync_state(_request):
 
 @routes.post(f"{API}/sync")
 async def sync_start(request):
+    _ = tr(request)
     body = await request.json()
     action = body.get("action", "sync")
     if action not in ACTIONS:
-        return web.json_response({"error": f"action inconnue : {action}"}, status=400)
+        return json_error(400, _("action inconnue : {action}", action=action))
     if job.running:
-        return web.json_response({"error": "une action est déjà en cours"}, status=409)
+        return json_error(409, _("une action est déjà en cours"))
     dry_run = bool(body.get("dry_run"))
     if READONLY and not (dry_run and action != "sizes"):
-        return json_error(403, "panneau en lecture seule (COMFY_PROFILES_READONLY) : dry-run seulement")
-    profiles = [] if action == "sizes" else profile_names(body.get("profiles"))
-    await job.start(action, profiles, dry_run, bool(body.get("with_extends")))
+        return json_error(403, _("panneau en lecture seule (COMFY_PROFILES_READONLY) : dry-run seulement"))
+    profiles = [] if action == "sizes" else profile_names(body.get("profiles"), request)
+    await job.start(action, profiles, dry_run, bool(body.get("with_extends")), request_lang(request))
     return web.json_response(job.state())
 
 
 @routes.post(f"{API}/stop")
-async def sync_stop(_request):
+async def sync_stop(request):
     if not job.running:
-        return web.json_response({"error": "aucune action en cours"}, status=409)
+        return json_error(409, tr(request)("aucune action en cours"))
     if not job.stopping:
         job.stop()
     return web.json_response(job.state())
@@ -284,20 +317,20 @@ async def sync_stop(_request):
 
 # --- Fichier de profils -------------------------------------------------------------------
 
-async def config_info():
+async def config_info(request):
     """Fichier de profils actif, son origine (option, env, user, seed) et où l'enregistrer."""
     # `where` ne lit pas le fichier : un fichier invalide peut ainsi être corrigé ou remplacé.
-    code, out, err = await run_cli("where")
+    lang = request_lang(request)
+    code, out, err = await run_cli("where", lang=lang)
     if code != 0:
-        raise web.HTTPBadRequest(text=json.dumps({"error": cli_error(err)}),
-                                 content_type="application/json")
+        raise bad_request(cli_error(err, i18n.translator(lang)))
     data = json.loads(out)
     return Path(data["config"]), data["source"], Path(data["writable"])
 
 
 @routes.get(f"{API}/config")
-async def get_config(_request):
-    path, source, writable = await config_info()
+async def get_config(request):
+    path, source, writable = await config_info(request)
     return web.json_response({
         "path": str(path),
         "source": source,
@@ -306,27 +339,27 @@ async def get_config(_request):
     })
 
 
-async def save_config(text, origin):
+async def save_config(text, origin, request):
     """Valide `text` sur une copie, puis remplace le fichier de profils modifiable (celui de
     l'utilisateur quand le modèle était actif)."""
     try:
         names = list(json.loads(text).get("profiles") or {})
     except (json.JSONDecodeError, AttributeError) as e:
-        return json_error(400, f"JSON invalide : {e}")
-    _, _, path = await config_info()
+        return json_error(400, tr(request)("JSON invalide : {error}", error=e))
+    _, _, path = await config_info(request)
     path.parent.mkdir(parents=True, exist_ok=True)
     # `list` vérifie les clés des profils, `show` de tous les profils vérifie les extends et
     # chaque modèle / custom node.
     tmp = path.with_name(f".{path.name}.edit")
     tmp.write_text(text)
     try:
-        await cli_json("list", config=tmp)
+        await cli_json("list", config=tmp, request=request)
         if names:
-            await cli_json("show", ",".join(names), config=tmp)
+            await cli_json("show", ",".join(names), config=tmp, request=request)
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
-    log.info("[comfy-profiles] %s mis à jour (%s)", path, origin)
+    log.info("[comfy-profiles] %s", t("{path} mis à jour ({origin})", path=path, origin=origin))
     return web.json_response({"ok": True, "path": str(path)})
 
 
@@ -334,15 +367,16 @@ async def save_config(text, origin):
 @writes
 async def put_config(request):
     body = await request.json()
-    return await save_config(body.get("text", ""), body.get("origin") or "édition dans le panneau")
+    return await save_config(body.get("text", ""), body.get("origin") or t("édition dans le panneau"), request)
 
 
 @routes.post(f"{API}/config/import-url")
 @writes
 async def import_config_url(request):
+    _ = tr(request)
     url = str((await request.json()).get("url") or "").strip()
     if not url.startswith(("https://", "http://")):
-        return json_error(400, "URL http(s) attendue")
+        return json_error(400, _("URL http(s) attendue"))
     try:
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -353,20 +387,22 @@ async def import_config_url(request):
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         return json_error(400, f"{url} : {e or type(e).__name__}")
     if len(body) > MAX_CONFIG_BYTES:
-        return json_error(400, f"{url} : fichier trop gros (plus de {MAX_CONFIG_BYTES // 1024 // 1024} Mo)")
-    return await save_config(body.decode("utf-8", errors="replace"), f"import de {url}")
+        return json_error(400, _("{url} : fichier trop gros (plus de {size})", url=url,
+                                 size=i18n.human_size(MAX_CONFIG_BYTES, _)))
+    return await save_config(body.decode("utf-8", errors="replace"), t("import de {url}", url=url), request)
 
 
 @routes.delete(f"{API}/config")
 @writes
-async def reset_config(_request):
+async def reset_config(request):
     """Revient au modèle : le fichier de l'utilisateur est mis de côté en profiles.json.bak."""
-    path, source, _ = await config_info()
+    path, source, _ = await config_info(request)
     if source != "user":
-        return json_error(409, "le fichier actif n'est pas celui de l'utilisateur, rien à réinitialiser")
+        return json_error(409, tr(request)(
+            "le fichier actif n'est pas celui de l'utilisateur, rien à réinitialiser"))
     backup = path.with_name(f"{path.name}.bak")
     path.replace(backup)
-    log.info("[comfy-profiles] retour au modèle, ancien fichier gardé en %s", backup)
+    log.info("[comfy-profiles] %s", t("retour au modèle, ancien fichier gardé en {path}", path=backup))
     return web.json_response({"ok": True, "backup": str(backup)})
 
 
@@ -376,7 +412,7 @@ def restart():
     """Comme le redémarrage de ComfyUI-Manager : sous comfy-cli, on signale le redémarrage et on
     quitte (comfy-cli relance) ; sinon, même PID (exec) : un conteneur dont ComfyUI est le
     processus principal reste en vie."""
-    log.info("[comfy-profiles] redémarrage de ComfyUI")
+    log.info("[comfy-profiles] %s", t("redémarrage de ComfyUI"))
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
@@ -397,9 +433,9 @@ def restart():
 
 @routes.post(f"{API}/restart")
 @writes
-async def restart_comfy(_request):
+async def restart_comfy(request):
     if job.running:
-        return web.json_response({"error": "action en cours, redémarrage refusé"}, status=409)
+        return json_error(409, tr(request)("action en cours, redémarrage refusé"))
     # Laisse partir la réponse avant de remplacer le processus.
     asyncio.get_running_loop().call_later(0.5, restart)
     return web.json_response({"ok": True})

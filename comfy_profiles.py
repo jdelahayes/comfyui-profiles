@@ -38,6 +38,8 @@ déduisent de $COMFY_HOME, sinon du ComfyUI dont ce dépôt est un custom node) 
 Les dépendances Python (custom nodes, pip) sont installées dans le Python qui lance ce script
 et notées dans son environnement (venv) : un nouveau conteneur les réinstalle, même si les
 custom nodes sont déjà sur un volume persistant.
+
+Langue des messages : $COMFY_PROFILES_LANG, sinon $LC_ALL, $LC_MESSAGES ou $LANG (en, fr).
 """
 import argparse
 import contextlib
@@ -54,6 +56,8 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
+
+from profiles_i18n import doc, human_size, t
 
 HERE = Path(__file__).resolve().parent
 EXAMPLE_CONFIG = HERE / "examples" / "profiles.example.json"
@@ -90,7 +94,7 @@ class Paths:
     def __init__(self):
         home = os.environ.get("COMFY_HOME") or default_comfy_home()
         if not home:
-            sys.exit("!! Dossier de ComfyUI inconnu : indique-le dans COMFY_HOME")
+            sys.exit("!! " + t("Dossier de ComfyUI inconnu : indique-le dans COMFY_HOME"))
         self.comfy_home = Path(home)
         self.models = env_path("COMFY_MODELS_DIR", self.comfy_home / "models")
         self.custom_nodes = env_path("COMFY_CUSTOM_NODES_DIR", self.comfy_home / "custom_nodes")
@@ -148,7 +152,8 @@ def model_folders(paths):
     try:
         import yaml
     except ImportError:
-        print(f"!! pyyaml absent : {', '.join(map(str, configs))} ignoré(s)", file=sys.stderr)
+        print("!! " + t("pyyaml absent : {files} ignoré(s)", files=", ".join(map(str, configs))),
+              file=sys.stderr)
         return folders
 
     def add(folder, path, is_default):  # folder_paths.add_model_folder_path
@@ -223,23 +228,21 @@ def load_profiles(path, source="option"):
         if source in ("option", "env") and path != seed and seed.is_file():
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(seed, path)
-            print(f">> {path} absent : copie du modèle ({seed}).")
+            print(">> " + t("{path} absent : copie du modèle ({seed}).", path=path, seed=seed))
         else:
-            sys.exit(f"!! Fichier de config introuvable : {path}")
+            sys.exit("!! " + t("Fichier de config introuvable : {path}", path=path))
     try:
         data = json.loads(path.read_text())
     except json.JSONDecodeError as e:
-        sys.exit(f"!! {path} : JSON invalide ({e})")
+        sys.exit("!! " + t("{path} : JSON invalide ({error})", path=path, error=e))
     profiles = data.get("profiles")
     if not isinstance(profiles, dict) or not profiles:
-        sys.exit(f"!! {path} : objet 'profiles' manquant ou vide")
+        sys.exit("!! " + t("{path} : objet 'profiles' manquant ou vide", path=path))
     for name, profile in profiles.items():
         unknown = {k for k in profile if not is_comment(k)} - PROFILE_KEYS
         if unknown:
-            sys.exit(
-                f"!! Profil '{name}' : clé(s) inconnue(s) {sorted(unknown)} "
-                f"(attendues : {', '.join(sorted(PROFILE_KEYS))})"
-            )
+            sys.exit("!! " + t("Profil '{name}' : clé(s) inconnue(s) {keys} (attendues : {expected})",
+                               name=name, keys=sorted(unknown), expected=", ".join(sorted(PROFILE_KEYS))))
     return profiles
 
 
@@ -254,9 +257,10 @@ def resolve(profiles, names):
 
     def visit(name, stack):
         if name in stack:
-            sys.exit(f"!! Cycle dans 'extends' : {' -> '.join([*stack, name])}")
+            sys.exit("!! " + t("Cycle dans 'extends' : {cycle}", cycle=" -> ".join([*stack, name])))
         if name not in profiles:
-            sys.exit(f"!! Profil inconnu : '{name}' (disponibles : {', '.join(profiles)})")
+            sys.exit("!! " + t("Profil inconnu : '{name}' (disponibles : {available})",
+                               name=name, available=", ".join(profiles)))
         if name in visited:
             return
         visited.add(name)
@@ -277,9 +281,11 @@ def resolve(profiles, names):
 def source_of(item, where):
     found = [k for k in SOURCES if k in item]
     if len(found) != 1:
-        raise ConfigError(f"{where} : une (et une seule) source attendue parmi {', '.join(SOURCES)}")
+        raise ConfigError(t("{where} : une (et une seule) source attendue parmi {sources}",
+                             where=where, sources=", ".join(SOURCES)))
     if found[0] in ("hf", "github") and not item.get("file"):
-        raise ConfigError(f"{where} : 'file' (chemin dans le dépôt) requis avec '{found[0]}'")
+        raise ConfigError(t("{where} : 'file' (chemin dans le dépôt) requis avec '{source}'",
+                             where=where, source=found[0]))
     if found[0] == "github":
         github_repo(item["github"], where)
     return found[0]
@@ -289,7 +295,8 @@ def github_repo(value, where=""):
     """'owner/repo' à partir de 'owner/repo' ou d'une URL de dépôt GitHub."""
     repo = re.sub(r"^(https?://)?github\.com/", "", value.strip()).rstrip("/").removesuffix(".git")
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
-        raise ConfigError(f"{where} : 'github' doit être 'owner/depot' ou l'URL d'un dépôt GitHub")
+        raise ConfigError(t("{where} : 'github' doit être 'owner/depot' ou l'URL d'un dépôt GitHub",
+                             where=where))
     return repo
 
 
@@ -361,7 +368,8 @@ def target_name(item, where):
         return item["name"]
     if "hf" in item or "github" in item:
         return Path(item["file"]).name
-    raise ConfigError(f"{where} : 'name' (nom du fichier local) requis pour une source url/civitai")
+    raise ConfigError(t("{where} : 'name' (nom du fichier local) requis pour une source url/civitai",
+                         where=where))
 
 
 def describe_source(item):
@@ -511,7 +519,7 @@ class Manifest:
             try:
                 self.items = json.loads(self.file.read_text()).get("items") or {}
             except (json.JSONDecodeError, AttributeError) as e:
-                sys.exit(f"!! {self.file} : JSON invalide ({e})")
+                sys.exit("!! " + t("{path} : JSON invalide ({error})", path=self.file, error=e))
         else:
             self.items = adopt_existing(profiles, paths) if paths.custom_nodes_store != paths.custom_nodes else {}
             self.adopted = bool(self.items)
@@ -552,7 +560,7 @@ def file_dest(item, where, section, paths):
     if section == "workflows":
         return paths.workflows / target_name(item, where)
     if not item.get("type"):
-        raise ConfigError(f"{where} : 'type' (sous-dossier, ex: loras) requis")
+        raise ConfigError(t("{where} : 'type' (sous-dossier, ex: loras) requis", where=where))
     return paths.model_path(item["type"], target_name(item, where))
 
 
@@ -607,15 +615,16 @@ def gdrive_id(value, where):
         return match.group(1)
     if re.fullmatch(r"[\w-]{20,}", value):
         return value
-    raise ConfigError(f"{where} : 'gdrive' doit être un lien de partage Google Drive ou un id de fichier")
+    raise ConfigError(t("{where} : 'gdrive' doit être un lien de partage Google Drive ou un id de fichier",
+                         where=where))
 
 
 def extract_encrypted_zip(archive, dest, file_id):
     """Zip chiffré (AES, ex. 7-Zip, ou ZipCrypto) : zipfile ne sait pas lire l'AES, pyzipper si."""
     password = os.environ.get("GDRIVE_ZIP_PASSWORD")
     if not password:
-        raise RuntimeError(f"le zip Drive {file_id} est chiffré : mot de passe attendu dans "
-                           "GDRIVE_ZIP_PASSWORD")
+        raise RuntimeError(t("le zip Drive {id} est chiffré : mot de passe attendu dans GDRIVE_ZIP_PASSWORD",
+                             id=file_id))
     try:
         import pyzipper
     except ImportError:  # pas installé d'avance : seulement utile aux zips chiffrés
@@ -626,8 +635,8 @@ def extract_encrypted_zip(archive, dest, file_id):
         try:
             zf.extractall(dest)  # même protection des chemins que zipfile
         except RuntimeError as e:
-            raise RuntimeError(f"zip Drive {file_id} : déchiffrement impossible "
-                               f"(GDRIVE_ZIP_PASSWORD erroné ?) : {e}") from None
+            raise RuntimeError(t("zip Drive {id} : déchiffrement impossible (GDRIVE_ZIP_PASSWORD erroné ?) : {error}",
+                                 id=file_id, error=e)) from None
 
 
 def install_gdrive_zip(file_id, store, paths):
@@ -641,8 +650,8 @@ def install_gdrive_zip(file_id, store, paths):
         fetch_url(f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
                   archive)
         if not zipfile.is_zipfile(archive):
-            raise RuntimeError(f"le fichier Drive {file_id} n'est pas un zip (non public, ou quota "
-                               "de téléchargement Drive dépassé ?)")
+            raise RuntimeError(t("le fichier Drive {id} n'est pas un zip (non public, ou quota de "
+                                 "téléchargement Drive dépassé ?)", id=file_id))
         extracted = work / "extracted"
         with zipfile.ZipFile(archive) as zf:
             encrypted = any(info.flag_bits & 0x1 for info in zf.infolist())
@@ -665,7 +674,8 @@ def custom_node_name(item, where):
     if item.get("name"):
         return item["name"]
     if not item.get("git"):
-        raise ConfigError(f"{where} : une (et une seule) source attendue parmi git, gdrive")
+        raise ConfigError(t("{where} : une (et une seule) source attendue parmi {sources}",
+                            where=where, sources="git, gdrive"))
     return item["git"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
 
 
@@ -736,12 +746,14 @@ def plan_custom_node(item, where, paths, manifest):
     url = item.get("git")
     drive = item.get("gdrive")
     if bool(url) == bool(drive):
-        raise ConfigError(f"{where} : une (et une seule) source attendue parmi git, gdrive")
+        raise ConfigError(t("{where} : une (et une seule) source attendue parmi {sources}",
+                            where=where, sources="git, gdrive"))
     if drive:
         if not item.get("name"):
-            raise ConfigError(f"{where} : 'name' (nom du dossier du custom node) requis avec 'gdrive'")
+            raise ConfigError(t("{where} : 'name' (nom du dossier du custom node) requis avec 'gdrive'",
+                                where=where))
         if item.get("ref"):
-            raise ConfigError(f"{where} : 'ref' ne s'applique qu'à une source 'git'")
+            raise ConfigError(t("{where} : 'ref' ne s'applique qu'à une source 'git'", where=where))
         file_id = gdrive_id(drive, where)
     name = custom_node_name(item, where)
     store = paths.custom_nodes_store / name
@@ -749,13 +761,19 @@ def plan_custom_node(item, where, paths, manifest):
     steps = []
 
     if foreign_node(name, paths):
-        print(f"   [{name}] déjà présent ({link}), hors gestionnaire : version du profil ignorée")
+        print(f"   [{name}] " + t("déjà présent ({path}), hors gestionnaire : version du profil ignorée",
+                                path=link))
         return name, steps
 
     alias = installed_elsewhere(name, item, paths)
     if alias:
-        how = "pris en charge" if alias in manifest else "hors gestionnaire"
-        print(f"   [{name}] déjà installé sous {alias.name} ({alias}), {how} : laissé tel quel")
+        if alias in manifest:
+            message = t("déjà installé sous {alias} ({path}), pris en charge : laissé tel quel",
+                        alias=alias.name, path=alias)
+        else:
+            message = t("déjà installé sous {alias} ({path}), hors gestionnaire : laissé tel quel",
+                        alias=alias.name, path=alias)
+        print(f"   [{name}] {message}")
         return name, steps
 
     ref = item.get("ref")
@@ -764,12 +782,13 @@ def plan_custom_node(item, where, paths, manifest):
     if drive:
         installed = store / GDRIVE_MARKER
         if not store.exists():
-            steps.append(Step(f"gdrive:{file_id} (zip) -> {store}",
+            steps.append(Step(t("gdrive:{id} (zip) -> {path}", id=file_id, path=store),
                               lambda: install_gdrive_zip(file_id, store, paths), record))
         elif not installed.is_file() or not managed:
-            print(f"   [{name}] {store} existe mais n'a pas été installé depuis Drive par le gestionnaire, laissé tel quel")
+            print(f"   [{name}] " + t("{path} existe mais n'a pas été installé depuis Drive par le gestionnaire, "
+                                "laissé tel quel", path=store))
         elif installed.read_text().strip() != file_id:
-            steps.append(Step(f"gdrive:{file_id} (zip, nouveau fichier) remplace {store}",
+            steps.append(Step(t("gdrive:{id} (zip, nouveau fichier) remplace {path}", id=file_id, path=store),
                               lambda: install_gdrive_zip(file_id, store, paths), record))
     elif not store.exists():
         def clone():
@@ -795,18 +814,20 @@ def plan_custom_node(item, where, paths, manifest):
         steps.append(Step(f"git clone {url}{'@' + ref if ref else ''} -> {store}", clone, record))
     elif ref and not at_ref(store, ref):
         if managed:
-            steps.append(Step(f"git checkout {ref} dans {store}", lambda: checkout_ref(store, ref)))
+            steps.append(Step(t("git checkout {ref} dans {path}", ref=ref, path=store),
+                              lambda: checkout_ref(store, ref)))
         else:
-            print(f"   [{name}] {store} n'a pas été installé par le gestionnaire : ref {ref} ignorée")
+            print(f"   [{name}] " + t("{path} n'a pas été installé par le gestionnaire : ref {ref} ignorée",
+                                path=store, ref=ref))
 
     if link != store and not link.is_symlink():
         def make_link():
             if not store.exists():  # clone ou extraction raté juste avant : pas de lien mort
-                raise RuntimeError(f"{store} absent, lien non créé")
+                raise RuntimeError(t("{path} absent, lien non créé", path=store))
             link.parent.mkdir(parents=True, exist_ok=True)
             link.symlink_to(store)
 
-        steps.append(Step(f"lien {link} -> {store}", make_link))
+        steps.append(Step(t("lien {link} -> {path}", link=link, path=store), make_link))
 
     # Les dépendances ne sont connues qu'une fois le dépôt cloné : on les évalue à l'exécution.
     def deps():
@@ -814,14 +835,14 @@ def plan_custom_node(item, where, paths, manifest):
         if requirements.is_file():
             m = marker("req", name, requirements.read_text())
             if not m.exists():
-                print(f">> [{name}] installation de requirements.txt")
+                print(f">> [{name}] " + t("installation de requirements.txt"))
                 pip_install(["-r", str(requirements)])
                 touch(m)
         install_py = store / "install.py"
         if install_py.is_file():
             m = marker("install", name, install_py.read_text())
             if not m.exists():
-                print(f">> [{name}] exécution de install.py")
+                print(f">> [{name}] " + t("exécution de install.py"))
                 subprocess.run([sys.executable, "install.py"], cwd=store, check=True)
                 touch(m)
 
@@ -832,7 +853,7 @@ def plan_custom_node(item, where, paths, manifest):
         for kind, f in (("req", store / "requirements.txt"), ("install", store / "install.py"))
     )
     if deps_pending:
-        steps.append(Step(f"dépendances de {name} (requirements.txt / install.py)", deps))
+        steps.append(Step(t("dépendances de {name} (requirements.txt / install.py)", name=name), deps))
     return name, steps
 
 
@@ -930,6 +951,36 @@ def profile_state(profiles, name, paths, memo=None):
     return memo.setdefault(name, state)
 
 
+def profile_total(profiles, name, paths=None):
+    """(total en octets des fichiers, nb de fichiers de taille inconnue), extends compris,
+    chaque fichier compté une fois. Les custom nodes et paquets pip ne comptent pas. Avec
+    `paths`, seulement les fichiers absents : ce qu'ajouterait l'installation du profil."""
+    merged = resolve(profiles, [name])
+    total, unknown, seen = 0, 0, set()
+    for section in ("models", "workflows"):
+        for profile, item in merged[section]:
+            where = f"[{profile}] {section}"
+            key = (section, item.get("type"), target_name(item, where))
+            if key in seen:
+                continue
+            seen.add(key)
+            if paths is not None and file_dest(item, where, section, paths).exists():
+                continue
+            size = item.get("size")
+            if isinstance(size, int) and not isinstance(size, bool):
+                total += size
+            else:
+                unknown += 1
+    return total, unknown
+
+
+def safe_total(profiles, name, paths=None):
+    try:
+        return profile_total(profiles, name, paths)
+    except (ConfigError, SystemExit):
+        return 0, 0
+
+
 def config_location(arg):
     path, source = config_source(arg)
     return {
@@ -967,6 +1018,11 @@ def cmd_list(profiles, args):
                 name: {
                     "description": profile.get("description", ""),
                     "size": profile.get("size", ""),
+                    # Total calculé à partir des tailles des fichiers, pour l'afficher dans la
+                    # langue du panneau ; "size" est le texte écrit par profile_sizes.py.
+                    **dict(zip(("total", "unknown"), safe_total(profiles, name))),
+                    # Part de ce total que l'installation du profil ajouterait (fichiers absents).
+                    **dict(zip(("todo", "todo_unknown"), safe_total(profiles, name, paths))),
                     "extends": profile.get("extends", []),
                     "counts": {s: len(profile.get(s, [])) for s in SECTIONS},
                     "state": profile_state(profiles, name, paths, states),
@@ -982,17 +1038,17 @@ def cmd_list(profiles, args):
         suffix = f"  (extends: {', '.join(extends)})" if extends else ""
         print(f"- {name}{suffix}")
         if profile.get("size"):
-            print(f"    taille : {profile['size']}")
+            print("    " + t("taille : {size}", size=profile["size"]))
         if profile.get("description"):
             print(f"    {profile['description']}")
         if counts:
-            print(f"    propre : {counts}")
+            print("    " + t("propre : {counts}", counts=counts))
 
 
 def cmd_show(profiles, args):
     names = split_names(args.profiles)
     if not names:
-        sys.exit("!! Indique au moins un profil (voir `list`)")
+        sys.exit("!! " + t("Indique au moins un profil (voir `list`)"))
     try:
         # Les messages de build_plan (custom nodes laissés tels quels...) ne doivent pas
         # polluer le JSON.
@@ -1017,18 +1073,19 @@ def cmd_show(profiles, args):
     for kind, name, missing, profile, size, _ in status:
         if profile != current:
             current = profile
-            lines.append(f"[{profile}]" + ("" if profile in names else " (hérité)"))
-        todo = "à télécharger" if kind in ("model", "workflow") else "à installer"
-        state = todo if missing else "présent, non pris en charge" if (kind, name) in unmanaged else "présent"
+            lines.append(f"[{profile}]" + ("" if profile in names else " " + t("(hérité)")))
+        todo = t("à télécharger") if kind in ("model", "workflow") else t("à installer")
+        state = (todo if missing else t("présent, non pris en charge") if (kind, name) in unmanaged
+                 else t("présent"))
         shown = (human_size(size) if size is not None else "?") if kind in ("model", "workflow") else ""
         lines.append(f"  {kind:<12} {name:<40} {shown:>9}  {state}")
-    print("\n".join(lines) or "(profil vide)")
+    print("\n".join(lines) or t("(profil vide)"))
 
 
 def cmd_sync(profiles, args):
     names = split_names(args.profiles or os.environ.get("COMFY_PROFILES"))
     if not names:
-        print(">> Aucun profil demandé (argument ou COMFY_PROFILES), rien à faire.")
+        print(">> " + t("Aucun profil demandé (argument ou COMFY_PROFILES), rien à faire."))
         return 0
     paths = Paths()
     manifest = Manifest(paths, profiles)
@@ -1037,8 +1094,8 @@ def cmd_sync(profiles, args):
     except ConfigError as e:
         sys.exit(f"!! {e}")
 
-    print(f">> Profils : {', '.join(names)} — {len(steps)} action(s) à faire")
-    print(f">> Modèles -> {paths.models}")
+    print(">> " + t("Profils : {names} — {n} action(s) à faire", names=", ".join(names), n=len(steps)))
+    print(">> " + t("Modèles -> {path}", path=paths.models))
     if not steps:
         return 0
     if args.dry_run:
@@ -1047,8 +1104,10 @@ def cmd_sync(profiles, args):
         return 0
     if manifest.adopted:
         manifest.save()
-        print(f">> {manifest.file} créé : {len(manifest.items)} élément(s) déjà présent(s) repris.")
-    print(">> HF_TOKEN détecté." if os.environ.get("HF_TOKEN") else ">> Pas de HF_TOKEN : téléchargements HF anonymes.")
+        print(">> " + t("{path} créé : {n} élément(s) déjà présent(s) repris.",
+                        path=manifest.file, n=len(manifest.items)))
+    print(">> " + (t("HF_TOKEN détecté.") if os.environ.get("HF_TOKEN")
+                   else t("Pas de HF_TOKEN : téléchargements HF anonymes.")))
 
     failures = []
     for i, step in enumerate(steps, 1):
@@ -1059,19 +1118,19 @@ def cmd_sync(profiles, args):
                 manifest.add(*step.record)
                 manifest.save()
         except KeyboardInterrupt:
-            print(f"!! Synchronisation interrompue ({i - 1}/{len(steps)} action(s) faite(s)).",
-                  file=sys.stderr)
+            print("!! " + t("Synchronisation interrompue ({done}/{total} action(s) faite(s)).",
+                            done=i - 1, total=len(steps)), file=sys.stderr)
             return 130
         except Exception as e:  # une étape ratée ne doit pas bloquer les suivantes
-            print(f"!! Échec : {e}", file=sys.stderr)
+            print("!! " + t("Échec : {error}", error=e), file=sys.stderr)
             failures.append(step.label)
 
     if failures:
-        print(f"!! {len(failures)} échec(s) sur {len(steps)} :", file=sys.stderr)
+        print("!! " + t("{n} échec(s) sur {total} :", n=len(failures), total=len(steps)), file=sys.stderr)
         for label in failures:
             print(f"   - {label}", file=sys.stderr)
         return 1
-    print(">> Synchronisation terminée.")
+    print(">> " + t("Synchronisation terminée."))
     return 0
 
 
@@ -1092,7 +1151,7 @@ def cmd_adopt(profiles, args):
     (foreign_node) restent exclus."""
     names = split_names(args.profiles)
     if not names:
-        sys.exit("!! Indique au moins un profil (voir `list`)")
+        sys.exit("!! " + t("Indique au moins un profil (voir `list`)"))
     paths = Paths()
     manifest = Manifest(paths, profiles)
     try:
@@ -1109,12 +1168,14 @@ def cmd_adopt(profiles, args):
         print_json({"adopted": [{"kind": kind, "name": label} for kind, label, _ in items.values()],
                     "dry_run": args.dry_run})
         return 0
-    verb = "seraient pris" if args.dry_run else "pris"
-    print(f">> {', '.join(names)} : {len(items)} élément(s) {verb} en charge")
+    if args.dry_run:
+        print(">> " + t("{names} : {n} élément(s) seraient pris en charge", names=", ".join(names), n=len(items)))
+    else:
+        print(">> " + t("{names} : {n} élément(s) pris en charge", names=", ".join(names), n=len(items)))
     for kind, label, _ in items.values():
         print(f"   {'[dry-run] ' if args.dry_run else ''}{kind:<12} {label}")
     if items and not args.dry_run:
-        print(">> La désinstallation de ces profils pourra désormais les supprimer.")
+        print(">> " + t("La désinstallation de ces profils pourra désormais les supprimer."))
     return 0
 
 
@@ -1170,13 +1231,6 @@ def disk_size(path):
     if path.is_symlink() or path.is_file():
         return path.lstat().st_size
     return sum(f.lstat().st_size for f in path.rglob("*") if f.is_file() and not f.is_symlink())
-
-
-def human_size(size):
-    for unit, factor in (("To", 1e12), ("Go", 1e9), ("Mo", 1e6), ("Ko", 1e3)):
-        if size >= factor:
-            return f"{size / factor:.1f} {unit}".replace(".", ",")
-    return f"{size} o"
 
 
 def remove(path, link, paths):
@@ -1261,7 +1315,7 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
 def cmd_uninstall(profiles, args):
     names = split_names(args.profiles)
     if not names:
-        sys.exit("!! Indique au moins un profil (voir `list`)")
+        sys.exit("!! " + t("Indique au moins un profil (voir `list`)"))
     paths = Paths()
     manifest = Manifest(paths, profiles)
     try:
@@ -1279,20 +1333,26 @@ def cmd_uninstall(profiles, args):
         })
         return 0
 
-    scope = " (extends compris)" if args.with_extends else ""
-    print(f">> Désinstallation : {', '.join(names)}{scope} — {len(removed)} élément(s), {human_size(freed)}")
+    values = {"names": ", ".join(names), "n": len(removed), "size": human_size(freed)}
+    if args.with_extends:
+        print(">> " + t("Désinstallation : {names} (extends compris) — {n} élément(s), {size}", **values))
+    else:
+        print(">> " + t("Désinstallation : {names} — {n} élément(s), {size}", **values))
     if plan["extends"] and not args.with_extends:
-        print(f">> Profils hérités laissés en place : {', '.join(plan['extends'])} (--with-extends pour les inclure)")
+        print(">> " + t("Profils hérités laissés en place : {names} (--with-extends pour les inclure)",
+                        names=", ".join(plan["extends"])))
     if plan["keep_profiles"]:
-        print(f">> Profils gardés (leurs éléments ne sont pas supprimés) : {', '.join(plan['keep_profiles'])}")
+        print(">> " + t("Profils gardés (leurs éléments ne sont pas supprimés) : {names}",
+                        names=", ".join(plan["keep_profiles"])))
+    kept = t("conservé")
     for k in plan["kept"]:
-        print(f"   conservé  {k['kind']:<12} {k['name']}  (utilisé par {', '.join(k['by'])})")
+        print(f"   {kept}  {k['kind']:<12} {k['name']}  " + t("(utilisé par {names})", names=", ".join(k["by"])))
     for u in plan["unmanaged"]:
-        print(f"   conservé  {u['kind']:<12} {u['name']}  (pas installé par le gestionnaire)")
+        print(f"   {kept}  {u['kind']:<12} {u['name']}  " + t("(pas installé par le gestionnaire)"))
     for name in plan["startup"]:
-        print(f"!! {name} est dans COMFY_PROFILES : il sera réinstallé au prochain démarrage.")
+        print("!! " + t("{name} est dans COMFY_PROFILES : il sera réinstallé au prochain démarrage.", name=name))
     if not removed:
-        print(">> Rien à supprimer.")
+        print(">> " + t("Rien à supprimer."))
         return 0
     if manifest.adopted and not args.dry_run:
         manifest.save()
@@ -1300,55 +1360,57 @@ def cmd_uninstall(profiles, args):
     for i, r in enumerate(removed, 1):
         label = f"{r['kind']:<12} {r['name']}  ({human_size(r['size'])})"
         if args.dry_run:
-            print(f"   [dry-run] supprimer {label}")
+            print("   [dry-run] " + t("supprimer {item}", item=label))
             continue
-        print(f">> ({i}/{len(removed)}) supprimer {label}", flush=True)
+        print(f">> ({i}/{len(removed)}) " + t("supprimer {item}", item=label), flush=True)
         try:
             remove(r["path"], r["link"], paths)
             manifest.discard(r["path"])
             manifest.save()
         except KeyboardInterrupt:
-            print(f"!! Désinstallation interrompue ({i - 1}/{len(removed)} supprimé(s)).", file=sys.stderr)
+            print("!! " + t("Désinstallation interrompue ({done}/{total} supprimé(s)).",
+                            done=i - 1, total=len(removed)), file=sys.stderr)
             return 130
         except OSError as e:
-            print(f"!! Échec : {e}", file=sys.stderr)
+            print("!! " + t("Échec : {error}", error=e), file=sys.stderr)
             return 1
     if args.dry_run:
         return 0
-    print(f">> Désinstallation terminée : {human_size(freed)} libérés.")
+    print(">> " + t("Désinstallation terminée : {size} libérés.", size=human_size(freed)))
     if any(r["kind"] == "custom_node" for r in removed):
-        print(">> Des custom nodes ont été supprimés : redémarre ComfyUI pour les décharger.")
-    print(">> Les paquets pip installés pour ces profils restent dans le venv.")
+        print(">> " + t("Des custom nodes ont été supprimés : redémarre ComfyUI pour les décharger."))
+    print(">> " + t("Les paquets pip installés pour ces profils restent dans le venv."))
     return 0
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        description=doc(__doc__, "comfy_profiles"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", help="fichier de profils (défaut : $COMFY_PROFILES_CONFIG, "
-                                         "<user>/__comfy_profiles/profiles.json, sinon le modèle)")
+    parser.add_argument("--config", help=t("fichier de profils (défaut : $COMFY_PROFILES_CONFIG, "
+                                           "<user>/__comfy_profiles/profiles.json, sinon le modèle)"))
     sub = parser.add_subparsers(dest="command", required=True)
-    lst = sub.add_parser("list", help="liste les profils disponibles")
-    lst.add_argument("--json", action="store_true", help="sortie JSON")
-    sub.add_parser("where", help="fichier de profils utilisé, son origine et où l'enregistrer (JSON, sans le lire)")
-    show = sub.add_parser("show", help="détaille ce qu'installent des profils, et ce qui est déjà là")
+    lst = sub.add_parser("list", help=t("liste les profils disponibles"))
+    lst.add_argument("--json", action="store_true", help=t("sortie JSON"))
+    sub.add_parser("where", help=t("fichier de profils utilisé, son origine et où l'enregistrer (JSON, sans le lire)"))
+    show = sub.add_parser("show", help=t("détaille ce qu'installent des profils, et ce qui est déjà là"))
     show.add_argument("profiles")
-    show.add_argument("--json", action="store_true", help="sortie JSON")
-    sync = sub.add_parser("sync", help="installe ce qui manque pour des profils")
-    sync.add_argument("profiles", nargs="?", help="défaut : $COMFY_PROFILES")
-    sync.add_argument("--dry-run", action="store_true", help="affiche les actions sans rien faire")
-    adopt = sub.add_parser("adopt", help="prend en charge ce qui est déjà présent pour des profils "
-                                         "(uninstall pourra le supprimer)")
+    show.add_argument("--json", action="store_true", help=t("sortie JSON"))
+    sync = sub.add_parser("sync", help=t("installe ce qui manque pour des profils"))
+    sync.add_argument("profiles", nargs="?", help=t("défaut : $COMFY_PROFILES"))
+    sync.add_argument("--dry-run", action="store_true", help=t("affiche les actions sans rien faire"))
+    adopt = sub.add_parser("adopt", help=t("prend en charge ce qui est déjà présent pour des profils "
+                                           "(uninstall pourra le supprimer)"))
     adopt.add_argument("profiles")
-    adopt.add_argument("--dry-run", action="store_true", help="affiche ce qui serait pris en charge")
-    adopt.add_argument("--json", action="store_true", help="sortie JSON")
-    uninstall = sub.add_parser("uninstall", help="supprime ce qu'ont installé des profils (sauf ce qui sert encore)")
+    adopt.add_argument("--dry-run", action="store_true", help=t("affiche ce qui serait pris en charge"))
+    adopt.add_argument("--json", action="store_true", help=t("sortie JSON"))
+    uninstall = sub.add_parser("uninstall", help=t("supprime ce qu'ont installé des profils (sauf ce qui sert encore)"))
     uninstall.add_argument("profiles")
-    uninstall.add_argument("--dry-run", action="store_true", help="affiche ce qui serait supprimé")
+    uninstall.add_argument("--dry-run", action="store_true", help=t("affiche ce qui serait supprimé"))
     uninstall.add_argument("--with-extends", action="store_true",
-                           help="désinstalle aussi les profils dont ils héritent (extends)")
-    uninstall.add_argument("--json", action="store_true", help="sortie JSON (implique --dry-run)")
+                           help=t("désinstalle aussi les profils dont ils héritent (extends)"))
+    uninstall.add_argument("--json", action="store_true", help=t("sortie JSON (implique --dry-run)"))
     args = parser.parse_args()
     if args.command == "where":
         print_json(config_location(args.config))
@@ -1356,8 +1418,8 @@ def main():
 
     path, source = config_source(args.config)
     as_json = getattr(args, "json", False)
-    note = " (modèle, lecture seule)" if source == "seed" else ""
-    print(f">> Config : {path}{note}", file=sys.stderr if as_json else sys.stdout)
+    note = " " + t("(modèle, lecture seule)") if source == "seed" else ""
+    print(">> " + t("Config : {path}", path=path) + note, file=sys.stderr if as_json else sys.stdout)
     with contextlib.redirect_stdout(sys.stderr if as_json else sys.stdout):
         profiles = load_profiles(path, source)
     commands = {"list": cmd_list, "show": cmd_show, "sync": cmd_sync, "uninstall": cmd_uninstall,

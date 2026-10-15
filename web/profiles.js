@@ -5,6 +5,30 @@ import { api } from "../../scripts/api.js";
 const API = "/comfy-profiles";
 const EVENT = "comfy-profiles.log";
 const MAX_LOG_LINES = 5000;
+const LANG_HEADER = "Comfy-Profiles-Lang";
+
+// Traductions : les messages sont en français dans le code et servent de clés ; le serveur
+// fournit {message français: traduction} pour la langue de ComfyUI (voir profiles_i18n.py).
+let LANG = "fr";
+let MESSAGES = {};
+
+function t(message, values = {}) {
+  const text = MESSAGES[message] || message;
+  return text.replace(/\{(\w+)\}/g, (all, key) => (key in values ? String(values[key]) : all));
+}
+
+// Langue de l'interface de ComfyUI (réglage Comfy.Locale), sinon celle du navigateur.
+async function loadMessages() {
+  const wanted = app.extensionManager?.setting?.get?.("Comfy.Locale") || navigator.language || "en";
+  try {
+    const resp = await api.fetchApi(`${API}/lang/${encodeURIComponent(wanted)}`);
+    const data = await resp.json();
+    LANG = data.lang;
+    MESSAGES = data.messages || {};
+  } catch (e) {
+    console.warn("[comfy-profiles]", e);
+  }
+}
 
 const STYLE = `
 .cprof { display: flex; flex-direction: column; gap: 10px; padding: 10px; height: 100%;
@@ -42,6 +66,7 @@ const STYLE = `
 .cprof .chip { font-size: 11px; padding: 0 6px; border-radius: 8px; white-space: nowrap;
   background: var(--comfy-input-bg); border: 1px solid var(--border-color); }
 .cprof .chip.default { border-color: #3a9a5a; color: #3a9a5a; }
+.cprof .chip.download { border-color: #3a7abf; color: #3a7abf; }
 .cprof .chip.unmanaged { border-color: #e0a030; color: #e0a030; border-style: dashed; }
 .cprof .legend .chip::before { display: none; }
 .cprof .details { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
@@ -76,9 +101,9 @@ function el(tag, attrs = {}, ...children) {
 }
 
 async function request(method, path, body) {
-  const options = { method };
+  const options = { method, headers: { [LANG_HEADER]: LANG } };
   if (body !== undefined) {
-    options.headers = { "Content-Type": "application/json" };
+    options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
   const resp = await api.fetchApi(`${API}${path}`, options);
@@ -114,7 +139,7 @@ class ProfilesPanel {
       this.setSync(sync);
       for (const name of this.expanded.keys()) this.expand(name, true);
     } catch (e) {
-      this.error = `Profils indisponibles : ${e.message}`;
+      this.error = t("Profils indisponibles : {error}", { error: e.message });
     }
     this.render();
   }
@@ -157,9 +182,9 @@ class ProfilesPanel {
     const { action, dry_run: dryRun, returncode } = detail;
     this.sync = { ...this.sync, running: false, stopping: false, action, dry_run: dryRun, returncode };
     const what = dryRun && action === "sync" ? "Dry-run" : actionLabel(action);
-    if (returncode === 0) toast("success", "Profils", `${what} : terminé.`);
-    else if (returncode === 130) toast("warn", "Profils", `${what} : arrêté.`);
-    else toast("error", "Profils", `${what} : incomplet, voir les logs.`);
+    if (returncode === 0) toast("success", t("Profils"), t("{action} : terminé.", { action: what }));
+    else if (returncode === 130) toast("warn", t("Profils"), t("{action} : arrêté.", { action: what }));
+    else toast("error", t("Profils"), t("{action} : incomplet, voir les logs.", { action: what }));
     // Modèles ajoutés ou supprimés : listes des nodes mises à jour tout de suite.
     if (!dryRun && action !== "sizes") app.refreshComboInNodes?.();
     // États des profils (et détails dépliés) à jour après l'action.
@@ -187,19 +212,19 @@ class ProfilesPanel {
       this.setSync(await request("POST", "/sync",
         { action, profiles, dry_run: dryRun, with_extends: withExtends }));
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
     this.render();
   }
 
   async stop() {
-    if (!confirm("Arrêter l'action en cours ? L'étape en cours est abandonnée proprement, " +
-                 "une prochaine synchronisation la reprendra.")) return;
+    if (!confirm(t("Arrêter l'action en cours ? L'étape en cours est abandonnée proprement, " +
+                   "une prochaine synchronisation la reprendra."))) return;
     try {
       const { running, stopping } = await request("POST", "/stop");
       this.sync = { ...this.sync, running, stopping };
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
     this.render();
   }
@@ -212,7 +237,7 @@ class ProfilesPanel {
         `/uninstall-plan?profiles=${encodeURIComponent(profiles.join(","))}&with_extends=${withExtends ? 1 : 0}`);
       this.uninstall = { profiles, plan, withExtends };
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
     this.render();
   }
@@ -220,14 +245,15 @@ class ProfilesPanel {
   // Prend en charge ce qui est déjà présent pour le profil : la désinstallation pourra le
   // supprimer.
   async adopt(name, count) {
-    if (!confirm(`Prendre en charge ${count} élément(s) déjà présent(s) pour ${name} (extends compris) ?\n\n` +
-                 "La désinstallation pourra ensuite les supprimer, y compris des custom nodes " +
-                 "installés avec le Manager ou des modèles copiés à la main.")) return;
+    if (!confirm(t("Prendre en charge {n} élément(s) déjà présent(s) pour {name} (extends compris) ?",
+                   { n: count, name }) + "\n\n" +
+                 t("La désinstallation pourra ensuite les supprimer, y compris des custom nodes " +
+                   "installés avec le Manager ou des modèles copiés à la main."))) return;
     try {
       const { adopted } = await request("POST", "/adopt", { profiles: [name] });
-      toast("success", "Profils", `${name} : ${adopted.length} élément(s) pris en charge.`);
+      toast("success", t("Profils"), t("{name} : {n} élément(s) pris en charge.", { name, n: adopted.length }));
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
     await this.load();
   }
@@ -239,12 +265,12 @@ class ProfilesPanel {
   }
 
   async restart() {
-    if (!confirm("Redémarrer ComfyUI ? Les générations en cours seront interrompues.")) return;
+    if (!confirm(t("Redémarrer ComfyUI ? Les générations en cours seront interrompues."))) return;
     try {
       await request("POST", "/restart");
-      toast("info", "Profils", "Redémarrage de ComfyUI… la page se reconnecte toute seule.");
+      toast("info", t("Profils"), t("Redémarrage de ComfyUI… la page se reconnecte toute seule."));
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
   }
 
@@ -253,7 +279,7 @@ class ProfilesPanel {
       this.editing = await request("GET", "/config");
       this.editError = "";
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
     this.render();
   }
@@ -262,7 +288,7 @@ class ProfilesPanel {
     try {
       await request("PUT", "/config", { text });
       this.editing = null;
-      toast("success", "Profils", "profiles.json enregistré.");
+      toast("success", t("Profils"), t("profiles.json enregistré."));
       await this.load();
     } catch (e) {
       this.editError = e.message;
@@ -277,27 +303,27 @@ class ProfilesPanel {
     const input = el("input", { type: "file", accept: ".json,application/json" });
     input.addEventListener("change", async () => {
       const file = input.files[0];
-      if (!file || !confirm(`Remplacer le fichier de profils par ${file.name} ?`)) return;
+      if (!file || !confirm(t("Remplacer le fichier de profils par {file} ?", { file: file.name }))) return;
       try {
-        await request("PUT", "/config", { text: await file.text(), origin: `import de ${file.name}` });
-        toast("success", "Profils", `${file.name} importé.`);
+        await request("PUT", "/config", { text: await file.text(), origin: `import ${file.name}` });
+        toast("success", t("Profils"), t("{file} importé.", { file: file.name }));
         await this.load();
       } catch (e) {
-        toast("error", "Profils", e.message);
+        toast("error", t("Profils"), e.message);
       }
     });
     input.click();
   }
 
   async importUrl() {
-    const url = prompt("URL du fichier de profils (ex. lien raw GitHub ou gist) :");
+    const url = prompt(t("URL du fichier de profils (ex. lien raw GitHub ou gist) :"));
     if (!url?.trim()) return;
     try {
       await request("POST", "/config/import-url", { url: url.trim() });
-      toast("success", "Profils", "Fichier de profils importé.");
+      toast("success", t("Profils"), t("Fichier de profils importé."));
       await this.load();
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
   }
 
@@ -311,18 +337,18 @@ class ProfilesPanel {
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
   }
 
   async resetToSeed() {
-    if (!confirm("Revenir au modèle ? Ton fichier de profils est gardé en profiles.json.bak.")) return;
+    if (!confirm(t("Revenir au modèle ? Ton fichier de profils est gardé en profiles.json.bak."))) return;
     try {
       const { backup } = await request("DELETE", "/config");
-      toast("success", "Profils", `Modèle rétabli, ancien fichier : ${backup}`);
+      toast("success", t("Profils"), t("Modèle rétabli, ancien fichier : {path}", { path: backup }));
       await this.load();
     } catch (e) {
-      toast("error", "Profils", e.message);
+      toast("error", t("Profils"), e.message);
     }
   }
 
@@ -337,36 +363,37 @@ class ProfilesPanel {
       el("span", { class: "muted" }, kind), el("span", { class: "name" }, name),
       extra && el("span", { class: "muted" }, extra));
     return el("div", { style: "display:flex;flex-direction:column;gap:8px" },
-      el("h3", {}, `Désinstaller : ${profiles.join(", ")}`),
+      el("h3", {}, t("Désinstaller : {names}", { names: profiles.join(", ") })),
       plan.extends.length > 0 && el("label", { class: "bar", style: "cursor:pointer" },
         el("input", { type: "checkbox", checked: withExtends,
                       onchange: (e) => this.prepareUninstall(profiles, e.target.checked) }),
-        `Inclure les profils hérités (${plan.extends.join(", ")})`),
+        t("Inclure les profils hérités ({names})", { names: plan.extends.join(", ") })),
       plan.extends.length > 0 && !withExtends && el("div", { class: "muted" },
-        "Seuls les éléments propres à ce(s) profil(s) partent ; les profils hérités restent installés."),
+        t("Seuls les éléments propres à ce(s) profil(s) partent ; les profils hérités restent installés.")),
       plan.remove.length
-        ? el("div", {}, `${plan.remove.length} élément(s) supprimé(s), ${formatSize(plan.freed)} libérés :`)
+        ? el("div", {}, t("{n} élément(s) supprimé(s), {size} libérés :",
+          { n: plan.remove.length, size: humanSize(plan.freed) }))
         : el("div", { class: "muted" }, plan.extends.length && !withExtends
-          ? "Rien à supprimer en propre : coche « Inclure les profils hérités » pour un profil qui ne fait que les regrouper."
-          : "Rien à supprimer : tout est absent ou encore utilisé."),
-      el("div", { class: "details" }, plan.remove.map((r) => item(r.kind, r.name, formatSize(r.size)))),
+          ? t("Rien à supprimer en propre : coche « Inclure les profils hérités » pour un profil qui ne fait que les regrouper.")
+          : t("Rien à supprimer : tout est absent ou encore utilisé.")),
+      el("div", { class: "details" }, plan.remove.map((r) => item(r.kind, r.name, humanSize(r.size)))),
       plan.kept.length > 0 && el("div", { class: "muted" },
-        `Conservés, car utilisés par ${plan.keep_profiles.join(", ")} :`),
+        t("Conservés, car utilisés par {names} :", { names: plan.keep_profiles.join(", ") })),
       plan.kept.length > 0 && el("div", { class: "details" },
         plan.kept.map((k) => item(k.kind, k.name, k.by.join(", ")))),
       plan.startup.length > 0 && el("div", { class: "warn" },
-        `${plan.startup.join(", ")} : dans COMFY_PROFILES, réinstallé(s) au prochain démarrage.`),
+        t("{names} : dans COMFY_PROFILES, réinstallé(s) au prochain démarrage.", { names: plan.startup.join(", ") })),
       plan.unmanaged.length > 0 && el("div", { class: "muted" },
-        "Laissés en place, car pas installés par le gestionnaire :"),
+        t("Laissés en place, car pas installés par le gestionnaire :")),
       plan.unmanaged.length > 0 && el("div", { class: "details" },
         plan.unmanaged.map((u) => item(u.kind, u.name))),
       plan.remove.some((r) => r.kind === "custom_node") && el("div", { class: "warn" },
-        "Des custom nodes seront supprimés : redémarre ComfyUI ensuite pour les décharger."),
-      el("div", { class: "muted" }, "Les paquets pip installés pour ces profils restent en place."),
+        t("Des custom nodes seront supprimés : redémarre ComfyUI ensuite pour les décharger.")),
+      el("div", { class: "muted" }, t("Les paquets pip installés pour ces profils restent en place.")),
       el("div", { class: "bar" },
         el("button", { class: "danger", disabled: !plan.remove.length, onclick: () => this.confirmUninstall() },
-          "Désinstaller"),
-        el("button", { onclick: () => { this.uninstall = null; this.render(); } }, "Annuler")),
+          t("Désinstaller")),
+        el("button", { onclick: () => { this.uninstall = null; this.render(); } }, t("Annuler"))),
     );
   }
 
@@ -374,32 +401,32 @@ class ProfilesPanel {
     const area = el("textarea", { spellcheck: "false" });
     area.value = this.editing.text;
     return el("div", { class: "cprof-editor", style: "display:flex;flex-direction:column;gap:8px" },
-      el("h3", {}, "Éditer les profils"),
+      el("h3", {}, t("Éditer les profils")),
       el("div", { class: "muted" }, this.editing.path),
       this.editing.source === "seed" && el("div", { class: "warn" },
-        `C'est le modèle, en lecture seule : l'enregistrement crée ton fichier de profils ` +
-        `(${this.editing.writable}), utilisé ensuite à sa place.`),
+        t("C'est le modèle, en lecture seule : l'enregistrement crée ton fichier de profils " +
+          "({path}), utilisé ensuite à sa place.", { path: this.editing.writable })),
       area,
       this.editError && el("div", { class: "error" }, this.editError),
       el("div", { class: "bar" },
-        el("button", { class: "primary", onclick: () => this.save(area.value) }, "Enregistrer"),
-        el("button", { onclick: () => { this.editing = null; this.render(); } }, "Annuler")),
+        el("button", { class: "primary", onclick: () => this.save(area.value) }, t("Enregistrer")),
+        el("button", { onclick: () => { this.editing = null; this.render(); } }, t("Annuler"))),
     );
   }
 
   renderMain() {
     const running = this.sync.running;
     const header = el("div", {},
-      el("h3", {}, "Profils"),
+      el("h3", {}, t("Profils")),
       this.data && el("div", { class: "muted", title: this.data.config },
-        `${SOURCES[this.data.source] || this.data.source} : ${this.data.config}`),
+        `${SOURCES[this.data.source] ? t(SOURCES[this.data.source]) : this.data.source} : ${this.data.config}`),
       this.data?.readonly && el("div", { class: "warn" },
-        "Lecture seule (COMFY_PROFILES_READONLY) : seul le dry-run est possible."),
+        t("Lecture seule (COMFY_PROFILES_READONLY) : seul le dry-run est possible.")),
       this.error && el("div", { class: "error" }, this.error));
     // Fichier de profils invalide : on peut encore le corriger, le remplacer ou revenir au modèle.
     if (!this.data) {
       return el("div", { style: "display:flex;flex-direction:column;gap:10px" }, header,
-        el("div", { class: "bar" }, el("button", { onclick: () => this.load() }, "Recharger")),
+        el("div", { class: "bar" }, el("button", { onclick: () => this.load() }, t("Recharger"))),
         this.configBar(running, null));
     }
     const locked = running || this.data.readonly;
@@ -407,7 +434,10 @@ class ProfilesPanel {
     const profiles = Object.entries(this.data.profiles).map(([name, p]) => {
       const detail = this.expanded.get(name);
       const state = STATES[p.state] || STATES.missing;
-      return el("div", { class: `profile ${p.state}${this.selected.has(name) ? " selected" : ""}`, title: state.label },
+      const label = t(state.label);
+      const size = profileSize(p);
+      const todo = todoSize(p);
+      return el("div", { class: `profile ${p.state}${this.selected.has(name) ? " selected" : ""}`, title: label },
         el("div", { class: "head" },
           el("label", {},
             el("input", {
@@ -420,27 +450,32 @@ class ProfilesPanel {
             name),
           el("div", { class: "actions" },
             p.unmanaged > 0 && iconButton("pi-link",
-              `Prendre en charge les ${p.unmanaged} élément(s) déjà présent(s) de ${name}…`,
+              t("Prendre en charge les {n} élément(s) déjà présent(s) de {name}…", { n: p.unmanaged, name }),
               locked, () => this.adopt(name, p.unmanaged)),
             iconButton("pi-download",
-              state.install ? `Installer ${name} (ce qui manque)` : `${name} : ${state.label.toLowerCase()}`,
+              state.install ? t("Installer {name} (ce qui manque)", { name }) : `${name} : ${label.toLowerCase()}`,
               locked || !state.install, () => this.startSync(false, "sync", [name])),
             iconButton("pi-trash",
-              state.uninstall ? `Désinstaller ${name}…` : `${name} : ${state.label.toLowerCase()}`,
+              state.uninstall ? t("Désinstaller {name}…", { name }) : `${name} : ${label.toLowerCase()}`,
               locked || !state.uninstall, () => this.prepareUninstall([name])),
             iconButton(this.expanded.has(name) ? "pi-chevron-down" : "pi-chevron-right",
-              this.expanded.has(name) ? "Masquer le détail" : "Voir ce qui est installé",
+              this.expanded.has(name) ? t("Masquer le détail") : t("Voir ce qui est installé"),
               false, () => this.expand(name)))),
         // Pastilles sous le nom : sur la même ligne, elles l'écraseraient dans la barre latérale.
-        (this.data.default.includes(name) || p.size || p.unmanaged > 0) && el("div", { class: "chips" },
+        (this.data.default.includes(name) || size || todo || p.unmanaged > 0) && el("div", { class: "chips" },
           this.data.default.includes(name) &&
-            el("span", { class: "chip default", title: "Dans COMFY_PROFILES : synchronisé à chaque démarrage" }, "démarrage"),
-          p.size && el("span", { class: "chip" }, p.size),
+            el("span", { class: "chip default", title: t("Dans COMFY_PROFILES : synchronisé à chaque démarrage") },
+              t("démarrage")),
+          size && el("span", { class: "chip", title: t("Taille totale des fichiers du profil, extends compris") }, size),
+          todo && el("span", {
+            class: "chip download",
+            title: t("Fichiers absents, que l'installation du profil ajouterait (custom nodes et paquets pip non comptés)"),
+          }, todo),
           p.unmanaged > 0 && el("span", {
             class: "chip unmanaged",
-            title: `${p.unmanaged} élément(s) présent(s), extends compris, mais pas installé(s) par ` +
-                   "le gestionnaire (Manager, copie à la main...) : la désinstallation les laisse en place.",
-          }, `${p.unmanaged} non pris en charge`)),
+            title: t("{n} élément(s) présent(s), extends compris, mais pas installé(s) par le gestionnaire " +
+                     "(Manager, copie à la main...) : la désinstallation les laisse en place.", { n: p.unmanaged }),
+          }, t("{n} non pris en charge", { n: p.unmanaged }))),
         p.description && el("div", { class: "muted" }, p.description),
         p.extends.length > 0 && el("div", { class: "muted" }, `extends : ${p.extends.join(", ")}`),
         this.expanded.has(name) && this.renderDetail(detail));
@@ -449,43 +484,43 @@ class ProfilesPanel {
     const selection = [...this.selected];
     const what = actionLabel(this.sync.action);
     const target = (this.sync.profiles || []).join(", ");
+    const last = what.toLowerCase();
     const status = running
-      ? `${what} ${this.sync.stopping ? "en cours d'arrêt" : "en cours"}` +
+      ? (this.sync.stopping ? t("{action} en cours d'arrêt", { action: what }) : t("{action} en cours", { action: what })) +
         `${target ? ` : ${target}` : ""}${this.sync.dry_run ? " (dry-run)" : ""}`
       : this.sync.returncode == null ? ""
-      : this.sync.returncode === 0 ? `Dernière action (${what.toLowerCase()}) : OK`
-      : this.sync.returncode === 130 ? `Dernière action (${what.toLowerCase()}) : arrêtée`
-      : `Dernière action (${what.toLowerCase()}) : échec (code ${this.sync.returncode})`;
+      : this.sync.returncode === 0 ? t("Dernière action ({action}) : OK", { action: last })
+      : this.sync.returncode === 130 ? t("Dernière action ({action}) : arrêtée", { action: last })
+      : t("Dernière action ({action}) : échec (code {code})", { action: last, code: this.sync.returncode });
 
     return el("div", { style: "display:flex;flex-direction:column;gap:10px" },
       header,
       el("div", { class: "bar" },
-        el("button", { onclick: () => this.load() }, "Recharger"),
+        el("button", { onclick: () => this.load() }, t("Recharger")),
         el("button", {
           onclick: () => this.startSync(false, "sizes", []), disabled: locked,
-          title: "Interroge Hugging Face / CivitAI / GitHub (sans rien télécharger) pour les " +
-                 "fichiers sans taille, et enregistre la taille de chaque profil dans profiles.json",
-        }, "Recalculer les tailles"),
-        el("button", { onclick: () => this.restart(), disabled: locked }, "Redémarrer ComfyUI")),
+          title: t("Interroge Hugging Face / CivitAI / GitHub (sans rien télécharger) pour les " +
+                   "fichiers sans taille, et enregistre la taille de chaque profil dans profiles.json"),
+        }, t("Recalculer les tailles")),
+        el("button", { onclick: () => this.restart(), disabled: locked }, t("Redémarrer ComfyUI"))),
       this.configBar(locked, this.data),
       el("div", { class: "legend" },
-        el("span", { class: "installed" }, "installé"),
-        el("span", { class: "partial" }, "partiellement installé"),
-        el("span", {}, "non installé"),
-        el("span", { class: "chip unmanaged", title: "Présent, mais pas installé par le gestionnaire : " +
-                     "la désinstallation le laisse en place" }, "non pris en charge")),
+        el("span", { class: "installed" }, t("installé")),
+        el("span", { class: "partial" }, t("partiellement installé")),
+        el("span", {}, t("non installé")),
+        el("span", { class: "chip unmanaged", title: t(UNMANAGED_HINT) }, t("non pris en charge"))),
       el("div", { class: "list" }, profiles),
       el("div", { class: "bar" },
         el("button", { class: "primary", disabled: locked || !selection.length,
                        onclick: () => this.startSync(false) },
-          selection.length ? `Synchroniser (${selection.length})` : "Synchroniser"),
+          selection.length ? t("Synchroniser ({n})", { n: selection.length }) : t("Synchroniser")),
         el("button", { disabled: running || !selection.length, onclick: () => this.startSync(true) }, "Dry-run"),
         el("button", { disabled: locked || !selection.length, onclick: () => this.prepareUninstall() },
-          "Désinstaller…"),
+          t("Désinstaller…")),
         running && el("button", { class: "danger", disabled: this.sync.stopping, onclick: () => this.stop() },
-          this.sync.stopping ? "Arrêt…" : "Arrêter")),
+          this.sync.stopping ? t("Arrêt…") : t("Arrêter"))),
       el("div", { class: "muted" },
-        "Nouveaux modèles : visibles directement. Nouveaux custom nodes : redémarrer ComfyUI."),
+        t("Nouveaux modèles : visibles directement. Nouveaux custom nodes : redémarrer ComfyUI.")),
       status && el("div", { class: this.sync.returncode ? "error" : "muted" }, status),
       this.logBox,
     );
@@ -495,22 +530,22 @@ class ProfilesPanel {
   configBar(locked, data) {
     return el("div", { class: "bar" },
       el("span", { class: "muted" }, "profiles.json :"),
-      el("button", { onclick: () => this.edit(), disabled: locked }, "Éditer"),
+      el("button", { onclick: () => this.edit(), disabled: locked }, t("Éditer")),
       el("button", { onclick: () => this.importFile(), disabled: locked,
-                     title: "Remplace le fichier de profils par un fichier de ton poste" }, "Importer…"),
+                     title: t("Remplace le fichier de profils par un fichier de ton poste") }, t("Importer…")),
       el("button", { onclick: () => this.importUrl(), disabled: locked,
-                     title: "Remplace le fichier de profils par celui d'une URL" }, "Depuis une URL…"),
-      el("button", { onclick: () => this.exportFile() }, "Exporter"),
+                     title: t("Remplace le fichier de profils par celui d'une URL") }, t("Depuis une URL…")),
+      el("button", { onclick: () => this.exportFile() }, t("Exporter")),
       (!data || data.source === "user") && el("button", {
         onclick: () => this.resetToSeed(), disabled: locked,
-        title: data ? `Remet en service le modèle (${data.seed})` : "Remet en service le modèle",
-      }, "Revenir au modèle"));
+        title: data ? t("Remet en service le modèle ({path})", { path: data.seed }) : t("Remet en service le modèle"),
+      }, t("Revenir au modèle")));
   }
 
   renderDetail(detail) {
-    if (detail === null || detail === undefined) return el("div", { class: "details muted" }, "Chargement…");
+    if (detail === null || detail === undefined) return el("div", { class: "details muted" }, t("Chargement…"));
     if (detail.error) return el("div", { class: "details error" }, detail.error);
-    if (!detail.length) return el("div", { class: "details muted" }, "(profil vide)");
+    if (!detail.length) return el("div", { class: "details muted" }, t("(profil vide)"));
     const missing = detail.filter((i) => i.missing).length;
     // Éléments regroupés par profil qui les déclare (le profil lui-même, puis ceux dont il
     // hérite) : `show --json` les renvoie déjà dans cet ordre.
@@ -524,9 +559,11 @@ class ProfilesPanel {
     const titled = groups.length > 1 || groups[0]?.inherited;
     return el("div", { class: "details" },
       el("div", { class: missing ? "todo" : "ok" },
-        missing ? `${missing} élément(s) à installer sur ${detail.length}` : "Tout est installé"),
+        missing ? t("{n} élément(s) à installer sur {total}", { n: missing, total: detail.length })
+          : t("Tout est installé")),
       groups.map((group) => [
-        titled && el("div", { class: "group" }, group.inherited ? `Hérité de ${group.profile}` : "Propre au profil",
+        titled && el("div", { class: "group" },
+          group.inherited ? t("Hérité de {name}", { name: group.profile }) : t("Propre au profil"),
           el("span", { class: "muted" }, ` · ${group.items.filter((i) => !i.missing).length}/${group.items.length}`)),
         group.items.map((item) => this.renderItem(item)),
       ]));
@@ -539,12 +576,10 @@ class ProfilesPanel {
       el("span", { class: "name" }, item.name),
       FILE_KINDS.has(item.kind) && el("span", {
         class: "size muted",
-        title: item.size == null ? "Taille inconnue : « Recalculer les tailles » l'interroge à la source" : `${item.size} octets`,
+        title: item.size == null ? t("Taille inconnue : « Recalculer les tailles » l'interroge à la source")
+          : t("{n} octets", { n: item.size }),
       }, item.size == null ? "?" : humanSize(item.size)),
-      item.unmanaged && el("span", {
-        class: "chip unmanaged",
-        title: "Présent, mais pas installé par le gestionnaire : la désinstallation le laisse en place",
-      }, "non pris en charge"),
+      item.unmanaged && el("span", { class: "chip unmanaged", title: t(UNMANAGED_HINT) }, t("non pris en charge")),
       this.renderLink(item.link));
   }
 
@@ -553,7 +588,7 @@ class ProfilesPanel {
     const site = LINK_SITES[link.site] || LINK_SITES.url;
     return el("a", {
       class: "link", href: link.url, target: "_blank", rel: "noopener noreferrer",
-      title: `${site.label} : ${link.url}`,
+      title: `${t(site.label)} : ${link.url}`,
     }, site.text ?? el("i", { class: site.icon }));
   }
 }
@@ -565,23 +600,40 @@ const LINK_SITES = {
   civitai: { label: "CivitAI", text: "C" },
   gdrive: { label: "Google Drive", icon: "pi pi-google" },
   pypi: { label: "PyPI", icon: "pi pi-box" },
-  git: { label: "Dépôt git", icon: "pi pi-code" },
+  git: { label: "Dépôt git", icon: "pi pi-code" },  // traduit à l'affichage
   url: { label: "Source", icon: "pi pi-external-link" },
 };
 
 // Seuls les fichiers ont une taille déclarée (pas les custom nodes ni les paquets pip).
 const FILE_KINDS = new Set(["model", "workflow"]);
 
-// Même format que human_size() côté Python : « 20,9 Go ».
+const UNMANAGED_HINT = "Présent, mais pas installé par le gestionnaire : la désinstallation le laisse en place";
+
+// Même format que human_size() côté Python : « 20,9 Go », « 20.9 GB ».
 function humanSize(size) {
   for (const [unit, factor] of [["To", 1e12], ["Go", 1e9], ["Mo", 1e6], ["Ko", 1e3]]) {
-    if (size >= factor) return `${(size / factor).toFixed(1).replace(".", ",")} ${unit}`;
+    if (size >= factor) return `${(size / factor).toFixed(1).replace(".", t(","))} ${t(unit)}`;
   }
-  return `${size} o`;
+  return `${size} ${t("o")}`;
+}
+
+// Taille d'un profil (`list --json`) : total de ses fichiers, dans la langue du panneau ; à
+// défaut, le texte écrit dans profiles.json par « Recalculer les tailles ».
+function profileSize(p) {
+  if (!p.total && !p.unknown) return p.size || "";
+  const total = humanSize(p.total || 0);
+  return p.unknown ? `${total} ${t("+ {n} fichier(s) de taille inconnue", { n: p.unknown })}` : total;
+}
+
+// Taille des fichiers que l'installation du profil ajouterait ; vide si rien ne manque.
+function todoSize(p) {
+  if (!p.todo && !p.todo_unknown) return "";
+  const size = t("{size} à télécharger", { size: humanSize(p.todo || 0) });
+  return p.todo_unknown ? `${size} ${t("+ {n} fichier(s) de taille inconnue", { n: p.todo_unknown })}` : size;
 }
 
 function actionLabel(action) {
-  return { uninstall: "Désinstallation", sizes: "Calcul des tailles" }[action] || "Synchronisation";
+  return t({ uninstall: "Désinstallation", sizes: "Calcul des tailles" }[action] || "Synchronisation");
 }
 
 // État d'installation d'un profil (`list --json`) : libellé, et actions permises.
@@ -608,28 +660,22 @@ function iconButton(icon, hint, disabled, onclick) {
     el("i", { class: `pi ${icon}` }));
 }
 
-function formatSize(bytes) {
-  for (const [unit, factor] of [["To", 1e12], ["Go", 1e9], ["Mo", 1e6], ["Ko", 1e3]]) {
-    if (bytes >= factor) return `${(bytes / factor).toFixed(1).replace(".", ",")} ${unit}`;
-  }
-  return `${bytes} o`;
-}
-
 let panel = null;
 
 app.registerExtension({
   name: "comfyui-profiles.panel",
-  setup() {
+  async setup() {
     if (!app.extensionManager?.registerSidebarTab) {
       console.warn("[comfy-profiles] registerSidebarTab indisponible dans ce frontend");
       return;
     }
+    await loadMessages();
     document.head.append(el("style", {}, STYLE));
     app.extensionManager.registerSidebarTab({
       id: "comfy-profiles",
       icon: "pi pi-box",
-      title: "Profils",
-      tooltip: "Profils d'utilisation (modèles, custom nodes)",
+      title: t("Profils"),
+      tooltip: t("Profils d'utilisation (modèles, custom nodes)"),
       type: "custom",
       render: (container) => {
         if (!panel) {

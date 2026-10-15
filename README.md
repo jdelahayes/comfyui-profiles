@@ -27,6 +27,7 @@ ajouté au graphe.
   `comfy_profiles.py` et `profile_sizes.py` en sous-processus, avec le Python de ComfyUI et
   ses chemins.
 - `web/profiles.js` : l'onglet de la barre latérale.
+- `profiles_i18n.py` et `lang/` : traductions (voir [Langue](#langue)).
 - `examples/profiles.example.json` : petit fichier de profils, utilisé tant qu'aucun autre
   n'est fourni.
 - `profiles.schema.json` : schéma JSON du fichier de profils (validation et autocomplétion
@@ -159,10 +160,24 @@ Mise à jour depuis une version sans manifeste : si les custom nodes sont rangé
 (`COMFY_PROFILES_NODES_STORE`), ce qui est déjà présent pour les profils du fichier est repris
 dans le manifeste à la première utilisation (ce stockage n'est rempli que par le gestionnaire).
 
+## Langue
+
+Le panneau, les messages du script et les erreurs du serveur sont en français ou en anglais.
+Le panneau suit la langue de ComfyUI (réglage *Langue*) ; en ligne de commande, c'est
+`COMFY_PROFILES_LANG`, sinon `LC_ALL`, `LC_MESSAGES` ou `LANG`. L'anglais est la langue par
+défaut, et celle d'une langue non traduite. Changer la langue de ComfyUI demande de recharger
+la page.
+
+Pour ajouter une langue : copier `lang/en.json` en `lang/<code>.json` (ex. `de.json`) et
+traduire les valeurs. Les clés sont les messages français du code ; les `{variables}` doivent
+rester telles quelles. Un message absent reste en français.
+
 ## Panneau
 
 - Liste des profils : description, taille, `extends`, badge *démarrage* pour ceux de
-  `COMFY_PROFILES`. La couleur de fond donne l'état : vert installé (tout est là, `extends`
+  `COMFY_PROFILES`. Pour un profil qui n'est pas entièrement installé, un badge bleu
+  *… à télécharger* donne la taille des fichiers absents, que son installation ajouterait
+  (`extends` compris ; les custom nodes et paquets pip ne sont pas comptés). La couleur de fond donne l'état : vert installé (tout est là, `extends`
   compris), orange partiel, neutre non installé. Seuls les éléments propres au profil comptent
   pour « partiel », pas ceux hérités ; un profil qui ne fait que regrouper d'autres profils
   est jugé sur leurs éléments hors de la base qu'ils ont tous en commun (pour
@@ -233,7 +248,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.9 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.4.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
