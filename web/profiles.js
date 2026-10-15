@@ -172,9 +172,10 @@ class ProfilesPanel {
     if (this.expanded.has(name)) this.render();
   }
 
-  async startSync(dryRun, action = "sync", profiles = [...this.selected]) {
+  async startSync(dryRun, action = "sync", profiles = [...this.selected], withExtends = false) {
     try {
-      this.setSync(await request("POST", "/sync", { action, profiles, dry_run: dryRun }));
+      this.setSync(await request("POST", "/sync",
+        { action, profiles, dry_run: dryRun, with_extends: withExtends }));
     } catch (e) {
       toast("error", "Profils", e.message);
     }
@@ -193,10 +194,13 @@ class ProfilesPanel {
     this.render();
   }
 
-  async prepareUninstall(profiles = [...this.selected]) {
+  // withExtends : désinstaller aussi les profils dont ils héritent (sinon seulement leurs
+  // éléments propres).
+  async prepareUninstall(profiles = [...this.selected], withExtends = false) {
     try {
-      const plan = await request("GET", `/uninstall-plan?profiles=${encodeURIComponent(profiles.join(","))}`);
-      this.uninstall = { profiles, plan };
+      const plan = await request("GET",
+        `/uninstall-plan?profiles=${encodeURIComponent(profiles.join(","))}&with_extends=${withExtends ? 1 : 0}`);
+      this.uninstall = { profiles, plan, withExtends };
     } catch (e) {
       toast("error", "Profils", e.message);
     }
@@ -204,9 +208,9 @@ class ProfilesPanel {
   }
 
   confirmUninstall() {
-    const { profiles } = this.uninstall;
+    const { profiles, withExtends } = this.uninstall;
     this.uninstall = null;
-    this.startSync(false, "uninstall", profiles);
+    this.startSync(false, "uninstall", profiles, withExtends);
   }
 
   async restart() {
@@ -303,15 +307,23 @@ class ProfilesPanel {
   }
 
   renderUninstall() {
-    const { profiles, plan } = this.uninstall;
+    const { profiles, plan, withExtends } = this.uninstall;
     const item = (kind, name, extra) => el("div", { class: "item" },
       el("span", { class: "muted" }, kind), el("span", { class: "name" }, name),
       extra && el("span", { class: "muted" }, extra));
     return el("div", { style: "display:flex;flex-direction:column;gap:8px" },
       el("h3", {}, `Désinstaller : ${profiles.join(", ")}`),
+      plan.extends.length > 0 && el("label", { class: "bar", style: "cursor:pointer" },
+        el("input", { type: "checkbox", checked: withExtends,
+                      onchange: (e) => this.prepareUninstall(profiles, e.target.checked) }),
+        `Inclure les profils hérités (${plan.extends.join(", ")})`),
+      plan.extends.length > 0 && !withExtends && el("div", { class: "muted" },
+        "Seuls les éléments propres à ce(s) profil(s) partent ; les profils hérités restent installés."),
       plan.remove.length
         ? el("div", {}, `${plan.remove.length} élément(s) supprimé(s), ${formatSize(plan.freed)} libérés :`)
-        : el("div", { class: "muted" }, "Rien à supprimer : tout est absent ou encore utilisé."),
+        : el("div", { class: "muted" }, plan.extends.length && !withExtends
+          ? "Rien à supprimer en propre : coche « Inclure les profils hérités » pour un profil qui ne fait que les regrouper."
+          : "Rien à supprimer : tout est absent ou encore utilisé."),
       el("div", { class: "details" }, plan.remove.map((r) => item(r.kind, r.name, formatSize(r.size)))),
       plan.kept.length > 0 && el("div", { class: "muted" },
         `Conservés, car utilisés par ${plan.keep_profiles.join(", ")} :`),

@@ -9,7 +9,7 @@ Usage:
   comfy_profiles.py [--config FICHIER] where
   comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
   comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
-  comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--dry-run] [--json]
+  comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
 
 Fichier de profils, le premier trouvé :
   1. --config FICHIER
@@ -17,9 +17,10 @@ Fichier de profils, le premier trouvé :
   3. <user>/__comfy_profiles/profiles.json : celui qu'écrivent l'édition et l'import du panneau
   4. le modèle, en lecture seule : $COMFY_PROFILES_SEED, sinon examples/profiles.example.json
 Profils synchronisés par défaut : $COMFY_PROFILES (séparés par des virgules).
-`uninstall` supprime les modèles, workflows et custom nodes de profils, sauf ceux dont a encore
-besoin un autre profil installé (voir cmd_uninstall) et ceux que le gestionnaire n'a pas
-installés lui-même (voir Manifest). Les paquets pip restent dans le venv.
+`uninstall` supprime les modèles, workflows et custom nodes propres à des profils (avec
+--with-extends : aussi ceux des profils dont ils héritent), sauf ceux dont a encore besoin un
+autre profil installé (voir plan_uninstall) et ceux que le gestionnaire n'a pas installés
+lui-même (voir Manifest). Les paquets pip restent dans le venv.
 Ctrl+C (SIGINT) interrompt proprement `sync` : le téléchargement ou le clone en cours est
 abandonné sans laisser de fichier incomplet, la prochaine synchro le reprendra.
 --json (list, show, uninstall) : résultat en JSON sur stdout, messages d'information sur stderr (utilisé
@@ -994,20 +995,37 @@ def remove(path, link, paths):
     # Sous-dossiers de modèles devenus vides (ex. diffusion_models/krea2).
     roots = paths.model_roots()
     parent = path.parent
-    while parent not in roots and roots & set(parent.parents) and not any(parent.iterdir()):
+    while (parent not in roots and parent.parent not in roots and roots & set(parent.parents)
+           and not any(parent.iterdir())):  # models/<type>/ reste, même vide
         parent.rmdir()
         parent = parent.parent
 
 
-def plan_uninstall(profiles, names, paths, manifest):
+def own_items(profiles, names):
+    """Comme resolve(), mais seulement les éléments écrits dans les profils eux-mêmes, sans
+    ceux dont ils héritent (extends)."""
+    resolve(profiles, names)  # valide les noms et les extends
+    return {section: [(name, item) for name in names for item in profiles[name].get(section, [])]
+            for section in SECTIONS}
+
+
+def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
     """Ce que supprime la désinstallation de `names`. Un élément est conservé s'il sert encore à
     un profil qu'on garde : un profil de COMFY_PROFILES (réinstallé à chaque démarrage), ou un
-    autre profil complètement installé. Les profils dont héritent ceux qu'on désinstalle ne
-    comptent pas (ils sont forcément installés) : leurs éléments partent, sauf s'ils servent à
-    un profil gardé. Ce que le gestionnaire n'a pas installé (absent du manifeste) reste."""
+    autre profil complètement installé. Ce que le gestionnaire n'a pas installé (absent du
+    manifeste) reste.
+
+    Par défaut, seuls les éléments propres à `names` partent : les profils dont ils héritent
+    (extends) sont des profils gardés comme les autres. Avec `with_extends`, ces profils
+    hérités sont désinstallés aussi (ils ne protègent donc rien) : leurs éléments partent,
+    sauf s'ils servent à un autre profil gardé."""
     startup = split_names(os.environ.get("COMFY_PROFILES"))
-    inherited = ancestors(profiles, names)
-    targets = installed_by(resolve(profiles, names), paths)
+    if with_extends:
+        inherited = ancestors(profiles, names)
+        targets = installed_by(resolve(profiles, names), paths)
+    else:
+        inherited = set(names)
+        targets = installed_by(own_items(profiles, names), paths)
 
     keep = [n for n in profiles if n not in names and n in startup]
     for name in profiles:
@@ -1040,6 +1058,9 @@ def plan_uninstall(profiles, names, paths, manifest):
         # Seulement ceux qui protègent effectivement quelque chose.
         "keep_profiles": [n for n in keep if any(n in k["by"] for k in kept)],
         "startup": [n for n in names if n in startup],
+        "with_extends": with_extends,
+        # Profils dont héritent ceux qu'on désinstalle : laissés en place sans with_extends.
+        "extends": sorted(ancestors(profiles, names) - set(names)),
     }
 
 
@@ -1050,7 +1071,7 @@ def cmd_uninstall(profiles, args):
     paths = Paths()
     manifest = Manifest(paths, profiles)
     try:
-        plan = plan_uninstall(profiles, names, paths, manifest)
+        plan = plan_uninstall(profiles, names, paths, manifest, args.with_extends)
     except ConfigError as e:
         sys.exit(f"!! {e}")
     removed = plan["remove"]
@@ -1064,7 +1085,10 @@ def cmd_uninstall(profiles, args):
         })
         return 0
 
-    print(f">> Désinstallation : {', '.join(names)} — {len(removed)} élément(s), {human_size(freed)}")
+    scope = " (extends compris)" if args.with_extends else ""
+    print(f">> Désinstallation : {', '.join(names)}{scope} — {len(removed)} élément(s), {human_size(freed)}")
+    if plan["extends"] and not args.with_extends:
+        print(f">> Profils hérités laissés en place : {', '.join(plan['extends'])} (--with-extends pour les inclure)")
     if plan["keep_profiles"]:
         print(f">> Profils gardés (leurs éléments ne sont pas supprimés) : {', '.join(plan['keep_profiles'])}")
     for k in plan["kept"]:
@@ -1123,6 +1147,8 @@ def main():
     uninstall = sub.add_parser("uninstall", help="supprime ce qu'ont installé des profils (sauf ce qui sert encore)")
     uninstall.add_argument("profiles")
     uninstall.add_argument("--dry-run", action="store_true", help="affiche ce qui serait supprimé")
+    uninstall.add_argument("--with-extends", action="store_true",
+                           help="désinstalle aussi les profils dont ils héritent (extends)")
     uninstall.add_argument("--json", action="store_true", help="sortie JSON (implique --dry-run)")
     args = parser.parse_args()
     if args.command == "where":

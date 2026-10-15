@@ -133,7 +133,8 @@ async def profile_status(request):
 @routes.get(f"{API}/uninstall-plan")
 async def uninstall_plan(request):
     names = profile_names(request.query.get("profiles"))
-    return web.json_response(await cli_json("uninstall", ",".join(names)))
+    extends = ["--with-extends"] if request.query.get("with_extends") in ("1", "true") else []
+    return web.json_response(await cli_json("uninstall", ",".join(names), *extends))
 
 
 # --- Synchronisation / désinstallation -----------------------------------------------------
@@ -173,13 +174,15 @@ class Job:
             del self.lines[old]
         PromptServer.instance.send_sync(EVENT, {"index": index, "text": text})
 
-    async def start(self, action, profiles, dry_run):
+    async def start(self, action, profiles, dry_run, with_extends=False):
         self.action, self.profiles, self.dry_run = action, profiles, dry_run
         self.returncode, self.lines, self.stopping = None, {}, False
         if action == "sizes":  # tous les profils, écrit les tailles dans le fichier de profils
             cmd = [SIZES_SCRIPT] + (["--dry-run"] if dry_run else [])
         else:
             cmd = [SCRIPT, action, ",".join(profiles)] + (["--dry-run"] if dry_run else [])
+            if action == "uninstall" and with_extends:
+                cmd.append("--with-extends")
         self.proc = await asyncio.create_subprocess_exec(
             sys.executable, *map(str, cmd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -254,7 +257,7 @@ async def sync_start(request):
     if READONLY and not (dry_run and action != "sizes"):
         return json_error(403, "panneau en lecture seule (COMFY_PROFILES_READONLY) : dry-run seulement")
     profiles = [] if action == "sizes" else profile_names(body.get("profiles"))
-    await job.start(action, profiles, dry_run)
+    await job.start(action, profiles, dry_run, bool(body.get("with_extends")))
     return web.json_response(job.state())
 
 

@@ -140,9 +140,13 @@ dépôt (remote `origin` de son `.git`, ou `Repository` de son `pyproject.toml`)
 des nodes installés par ComfyUI-Manager depuis le Comfy Registry, rangés sous leur id du
 registry : `comfyui-kjnodes` pour `ComfyUI-KJNodes`.
 
-`uninstall` supprime les modèles, workflows et custom nodes des profils, `extends` compris,
-sauf ce qui sert encore à un profil gardé : un profil de `COMFY_PROFILES`, ou un autre profil
-complètement installé. Les paquets pip ne sont jamais supprimés.
+`uninstall` supprime les modèles, workflows et custom nodes **propres** aux profils, sauf ce
+qui sert encore à un profil gardé : un profil de `COMFY_PROFILES`, ou un autre profil
+complètement installé, y compris ceux dont ils héritent. Exemple : désinstaller `krea2` (qui
+hérite de `krea2-common`) supprime son modèle de diffusion, mais garde le text encoder et le
+VAE de `krea2-common`. Avec `--with-extends` (case « Inclure les profils hérités » dans le
+panneau), les profils hérités sont désinstallés aussi : c'est ce qu'il faut pour un profil qui
+ne fait que regrouper d'autres profils. Les paquets pip ne sont jamais supprimés.
 
 Mise à jour depuis une version sans manifeste : si les custom nodes sont rangés à part
 (`COMFY_PROFILES_NODES_STORE`), ce qui est déjà présent pour les profils du fichier est repris
@@ -177,7 +181,7 @@ comfy_profiles.py [--config FICHIER] list [--json]
 comfy_profiles.py [--config FICHIER] where                    # fichier utilisé et son origine (JSON)
 comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
 comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
-comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--dry-run] [--json]
+comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
 profile_sizes.py [--config FICHIER] [--env FICHIER] [--force] [--dry-run]
 ```
 
@@ -216,7 +220,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.3 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.4 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
