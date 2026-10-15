@@ -651,7 +651,8 @@ def plan_custom_node(item, where, paths, manifest):
 
     alias = installed_elsewhere(name, item, paths)
     if alias:
-        print(f"   [{name}] déjà installé sous {alias.name} ({alias}), hors gestionnaire : laissé tel quel")
+        how = "pris en charge" if alias in manifest else "hors gestionnaire"
+        print(f"   [{name}] déjà installé sous {alias.name} ({alias}), {how} : laissé tel quel")
         return name, steps
 
     ref = item.get("ref")
@@ -733,8 +734,10 @@ def plan_custom_node(item, where, paths, manifest):
 
 
 def build_plan(merged, paths, manifest):
-    """Retourne (étapes à exécuter, état de chaque élément : (genre, nom, à installer ?)).
-    Valide toute la config avant d'agir."""
+    """Retourne (étapes à exécuter, état de chaque élément : (genre, nom, à installer ?, profil
+    qui le déclare)). Un élément déclaré par plusieurs profils revient au premier dans l'ordre
+    de resolve(), donc au profil hérité plutôt qu'à celui qui en hérite. Valide toute la config
+    avant d'agir."""
     steps, status, seen = [], [], set()
 
     for profile, item in merged["custom_nodes"]:
@@ -744,15 +747,14 @@ def build_plan(merged, paths, manifest):
             continue
         seen.add(name)
         steps += node_steps
-        status.append(("custom_node", name, bool(node_steps)))
+        status.append(("custom_node", name, bool(node_steps), profile))
 
-    specs = []
+    specs = {}  # spécification -> premier profil qui la déclare
     for profile, spec in merged["pip"]:
-        if spec not in specs:
-            specs.append(spec)
+        specs.setdefault(spec, profile)
     missing_specs = [s for s in specs if not marker("pip", "spec", s).exists()]
-    for spec in specs:
-        status.append(("pip", spec, spec in missing_specs))
+    for spec, profile in specs.items():
+        status.append(("pip", spec, spec in missing_specs, profile))
     if missing_specs:
         def install_specs():
             pip_install(missing_specs)
@@ -768,7 +770,7 @@ def build_plan(merged, paths, manifest):
                 continue
             seen.add(dest)
             step = plan_file(item, dest, section[:-1], paths)
-            status.append((section[:-1], file_label(item, section, dest), bool(step)))
+            status.append((section[:-1], file_label(item, section, dest), bool(step), profile))
             if step:
                 steps.append(step)
 
@@ -885,15 +887,23 @@ def cmd_show(profiles, args):
             unmanaged = {(kind, label) for kind, label, _ in unmanaged_items(profiles, names, paths, manifest).values()}
     except ConfigError as e:
         sys.exit(f"!! {e}")
+    # Regroupés par profil qui les déclare : ceux demandés d'abord, puis les profils hérités
+    # dans l'ordre de resolve() (parents avant enfants).
+    order = list(dict.fromkeys([*names, *(st[3] for st in status)]))
+    status = sorted(status, key=lambda st: order.index(st[3]))
     if args.json:
-        print_json([{"kind": kind, "name": name, "missing": missing,
-                     "unmanaged": (kind, name) in unmanaged} for kind, name, missing in status])
+        print_json([{"kind": kind, "name": name, "missing": missing, "profile": profile,
+                     "inherited": profile not in names, "unmanaged": (kind, name) in unmanaged}
+                    for kind, name, missing, profile in status])
         return
-    lines = []
-    for kind, name, missing in status:
+    lines, current = [], None
+    for kind, name, missing, profile in status:
+        if profile != current:
+            current = profile
+            lines.append(f"[{profile}]" + ("" if profile in names else " (hérité)"))
         todo = "à télécharger" if kind in ("model", "workflow") else "à installer"
         state = todo if missing else "présent, non pris en charge" if (kind, name) in unmanaged else "présent"
-        lines.append(f"{kind:<12} {name:<40} {state}")
+        lines.append(f"  {kind:<12} {name:<40} {state}")
     print("\n".join(lines) or "(profil vide)")
 
 
@@ -949,6 +959,14 @@ def cmd_sync(profiles, args):
 
 # --- Prise en charge ----------------------------------------------------------------------
 
+def mark_deps_installed(name, store):
+    """Le node fonctionnait déjà : ses dépendances (requirements.txt, install.py) sont notées
+    comme installées dans ce venv, sans quoi sync voudrait les réinstaller."""
+    for kind, f in (("req", store / "requirements.txt"), ("install", store / "install.py")):
+        if f.is_file():
+            touch(marker(kind, name, f.read_text()))
+
+
 def cmd_adopt(profiles, args):
     """Inscrit au manifeste ce qui est déjà présent pour des profils (extends compris) sans
     avoir été installé par le gestionnaire : `uninstall` pourra ensuite le supprimer, et `sync`
@@ -964,8 +982,10 @@ def cmd_adopt(profiles, args):
     except ConfigError as e:
         sys.exit(f"!! {e}")
     if not args.dry_run and items:
-        for path, (kind, _, _) in items.items():
+        for path, (kind, label, _) in items.items():
             manifest.add(path, kind)
+            if kind == "custom_node":
+                mark_deps_installed(label, path)
         manifest.save()
     if args.json:
         print_json({"adopted": [{"kind": kind, "name": label} for kind, label, _ in items.values()],

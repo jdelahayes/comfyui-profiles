@@ -150,7 +150,8 @@ ne fait que regrouper d'autres profils. Les paquets pip ne sont jamais supprimé
 
 Pour qu'`uninstall` puisse quand même supprimer ce qui était déjà là, **prends-le en charge** :
 `adopt PROFIL` (bouton « lien » du profil dans le panneau) inscrit au manifeste tout ce qui
-est présent pour le profil, `extends` compris. Le panneau signale ce qui n'est pas encore pris
+est présent pour le profil, `extends` compris. Les dépendances de ses custom nodes sont
+considérées comme déjà installées (le node fonctionnait déjà) : `sync` ne les relance pas. Le panneau signale ce qui n'est pas encore pris
 en charge : pastille orange « N non pris en charge » sur le profil, et mention sur chaque
 élément dans son détail.
 
@@ -167,7 +168,8 @@ dans le manifeste à la première utilisation (ce stockage n'est rempli que par 
   est partiel si l'un d'eux est installé ou partiel.
 - Boutons par profil : installer (s'il n'est pas complètement installé), désinstaller (s'il
   l'est, même partiellement), prendre en charge (s'il a des éléments non pris en charge),
-  détail de ce qui est présent ou non.
+  détail de ce qui est présent ou non, regroupé par profil qui déclare chaque élément (le
+  profil lui-même, puis chaque profil hérité).
 - Synchronisation, dry-run ou désinstallation des profils cochés, avec les logs en direct.
   Une seule action à la fois ; **Arrêter** l'interrompt proprement (le téléchargement ou le
   clone en cours est abandonné sans laisser de fichier incomplet).
@@ -228,7 +230,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.5 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.6 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json

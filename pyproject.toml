@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-profiles"
 description = "Profils d'utilisation pour ComfyUI : installe, vérifie et désinstalle depuis la barre latérale les modèles, custom nodes, workflows et paquets pip d'un usage, décrits dans un profiles.json."
-version = "0.3.5"
+version = "0.3.6"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 # huggingface_hub : téléchargements depuis Hugging Face (déjà présent avec ComfyUI).

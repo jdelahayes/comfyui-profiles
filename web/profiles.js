@@ -36,8 +36,9 @@ const STYLE = `
 .cprof .legend .installed::before { background: rgba(58, 154, 90, .5); }
 .cprof .legend .partial::before { background: rgba(224, 160, 48, .5); }
 .cprof .head { display: flex; gap: 8px; align-items: center; }
-.cprof .head label { flex: 1; display: flex; gap: 6px; align-items: center; cursor: pointer;
-  font-weight: 600; word-break: break-all; }
+.cprof .head label { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; cursor: pointer;
+  font-weight: 600; overflow-wrap: anywhere; }
+.cprof .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 2px; }
 .cprof .chip { font-size: 11px; padding: 0 6px; border-radius: 8px; white-space: nowrap;
   background: var(--comfy-input-bg); border: 1px solid var(--border-color); }
 .cprof .chip.default { border-color: #3a9a5a; color: #3a9a5a; }
@@ -45,6 +46,9 @@ const STYLE = `
 .cprof .legend .chip::before { display: none; }
 .cprof .details { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .cprof .item { display: flex; gap: 6px; font-size: 12px; font-family: monospace; }
+.cprof .details .group { margin-top: 6px; font-size: 12px; font-weight: 600;
+  border-bottom: 1px solid var(--border-color); }
+.cprof .details .group ~ .item { margin-left: 8px; }
 .cprof .item .name { flex: 1; word-break: break-all; }
 .cprof .ok { color: #3a9a5a; }
 .cprof .todo { color: #e0a030; }
@@ -63,7 +67,7 @@ function el(tag, attrs = {}, ...children) {
     else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
     else if (value !== false && value != null) node.setAttribute(key, value === true ? "" : value);
   }
-  node.append(...children.flat().filter((c) => c != null && c !== false));
+  node.append(...children.flat(Infinity).filter((c) => c != null && c !== false));
   return node;
 }
 
@@ -410,14 +414,6 @@ class ProfilesPanel {
               },
             }),
             name),
-          this.data.default.includes(name) &&
-            el("span", { class: "chip default", title: "Dans COMFY_PROFILES : synchronisé à chaque démarrage" }, "démarrage"),
-          p.size && el("span", { class: "chip" }, p.size),
-          p.unmanaged > 0 && el("span", {
-            class: "chip unmanaged",
-            title: `${p.unmanaged} élément(s) présent(s), extends compris, mais pas installé(s) par ` +
-                   "le gestionnaire (Manager, copie à la main...) : la désinstallation les laisse en place.",
-          }, `${p.unmanaged} non pris en charge`),
           el("div", { class: "actions" },
             p.unmanaged > 0 && iconButton("pi-link",
               `Prendre en charge les ${p.unmanaged} élément(s) déjà présent(s) de ${name}…`,
@@ -431,6 +427,16 @@ class ProfilesPanel {
             iconButton(this.expanded.has(name) ? "pi-chevron-down" : "pi-chevron-right",
               this.expanded.has(name) ? "Masquer le détail" : "Voir ce qui est installé",
               false, () => this.expand(name)))),
+        // Pastilles sous le nom : sur la même ligne, elles l'écraseraient dans la barre latérale.
+        (this.data.default.includes(name) || p.size || p.unmanaged > 0) && el("div", { class: "chips" },
+          this.data.default.includes(name) &&
+            el("span", { class: "chip default", title: "Dans COMFY_PROFILES : synchronisé à chaque démarrage" }, "démarrage"),
+          p.size && el("span", { class: "chip" }, p.size),
+          p.unmanaged > 0 && el("span", {
+            class: "chip unmanaged",
+            title: `${p.unmanaged} élément(s) présent(s), extends compris, mais pas installé(s) par ` +
+                   "le gestionnaire (Manager, copie à la main...) : la désinstallation les laisse en place.",
+          }, `${p.unmanaged} non pris en charge`)),
         p.description && el("div", { class: "muted" }, p.description),
         p.extends.length > 0 && el("div", { class: "muted" }, `extends : ${p.extends.join(", ")}`),
         this.expanded.has(name) && this.renderDetail(detail));
@@ -502,17 +508,35 @@ class ProfilesPanel {
     if (detail.error) return el("div", { class: "details error" }, detail.error);
     if (!detail.length) return el("div", { class: "details muted" }, "(profil vide)");
     const missing = detail.filter((i) => i.missing).length;
+    // Éléments regroupés par profil qui les déclare (le profil lui-même, puis ceux dont il
+    // hérite) : `show --json` les renvoie déjà dans cet ordre.
+    const groups = [];
+    for (const item of detail) {
+      if (groups.at(-1)?.profile !== item.profile) {
+        groups.push({ profile: item.profile, inherited: item.inherited, items: [] });
+      }
+      groups.at(-1).items.push(item);
+    }
+    const titled = groups.length > 1 || groups[0]?.inherited;
     return el("div", { class: "details" },
       el("div", { class: missing ? "todo" : "ok" },
         missing ? `${missing} élément(s) à installer sur ${detail.length}` : "Tout est installé"),
-      detail.map((item) => el("div", { class: "item" },
-        el("span", { class: item.missing ? "todo" : "ok" }, item.missing ? "✗" : "✓"),
-        el("span", { class: "muted" }, item.kind),
-        el("span", { class: "name" }, item.name),
-        item.unmanaged && el("span", {
-          class: "chip unmanaged",
-          title: "Présent, mais pas installé par le gestionnaire : la désinstallation le laisse en place",
-        }, "non pris en charge"))));
+      groups.map((group) => [
+        titled && el("div", { class: "group" }, group.inherited ? `Hérité de ${group.profile}` : "Propre au profil",
+          el("span", { class: "muted" }, ` · ${group.items.filter((i) => !i.missing).length}/${group.items.length}`)),
+        group.items.map((item) => this.renderItem(item)),
+      ]));
+  }
+
+  renderItem(item) {
+    return el("div", { class: "item" },
+      el("span", { class: item.missing ? "todo" : "ok" }, item.missing ? "✗" : "✓"),
+      el("span", { class: "muted" }, item.kind),
+      el("span", { class: "name" }, item.name),
+      item.unmanaged && el("span", {
+        class: "chip unmanaged",
+        title: "Présent, mais pas installé par le gestionnaire : la désinstallation le laisse en place",
+      }, "non pris en charge"));
   }
 }
 
