@@ -10,6 +10,7 @@ Usage:
   comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
   comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
   comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
+  comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
 
 Fichier de profils, le premier trouvé :
   1. --config FICHIER
@@ -821,9 +822,26 @@ def config_location(arg):
     }
 
 
+def unmanaged_items(profiles, names, paths, manifest):
+    """Éléments présents pour ces profils (extends compris) que le gestionnaire n'a pas installés
+    lui-même : {chemin: (genre, nom, lien)}. `uninstall` les laisse en place ; `adopt` les prend
+    en charge."""
+    targets = installed_by(resolve(profiles, names), paths)
+    return {path: target for path, target in targets.items()
+            if present(path, target[2]) and path not in manifest}
+
+
+def count_unmanaged(profiles, name, paths, manifest):
+    try:
+        return len(unmanaged_items(profiles, [name], paths, manifest))
+    except (ConfigError, SystemExit):
+        return 0
+
+
 def cmd_list(profiles, args):
     if args.json:
         paths, states = Paths(), {}
+        manifest = Manifest(paths, profiles)
         print_json({
             **config_location(args.config),
             "default": split_names(os.environ.get("COMFY_PROFILES")),
@@ -834,6 +852,7 @@ def cmd_list(profiles, args):
                     "extends": profile.get("extends", []),
                     "counts": {s: len(profile.get(s, [])) for s in SECTIONS},
                     "state": profile_state(profiles, name, paths, states),
+                    "unmanaged": count_unmanaged(profiles, name, paths, manifest),
                 }
                 for name, profile in profiles.items()
             },
@@ -861,16 +880,20 @@ def cmd_show(profiles, args):
         # polluer le JSON.
         with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
             paths = Paths()
-            _, status = build_plan(resolve(profiles, names), paths, Manifest(paths, profiles))
+            manifest = Manifest(paths, profiles)
+            _, status = build_plan(resolve(profiles, names), paths, manifest)
+            unmanaged = {(kind, label) for kind, label, _ in unmanaged_items(profiles, names, paths, manifest).values()}
     except ConfigError as e:
         sys.exit(f"!! {e}")
     if args.json:
-        print_json([{"kind": kind, "name": name, "missing": missing} for kind, name, missing in status])
+        print_json([{"kind": kind, "name": name, "missing": missing,
+                     "unmanaged": (kind, name) in unmanaged} for kind, name, missing in status])
         return
     lines = []
     for kind, name, missing in status:
         todo = "à télécharger" if kind in ("model", "workflow") else "à installer"
-        lines.append(f"{kind:<12} {name:<40} {todo if missing else 'présent'}")
+        state = todo if missing else "présent, non pris en charge" if (kind, name) in unmanaged else "présent"
+        lines.append(f"{kind:<12} {name:<40} {state}")
     print("\n".join(lines) or "(profil vide)")
 
 
@@ -921,6 +944,39 @@ def cmd_sync(profiles, args):
             print(f"   - {label}", file=sys.stderr)
         return 1
     print(">> Synchronisation terminée.")
+    return 0
+
+
+# --- Prise en charge ----------------------------------------------------------------------
+
+def cmd_adopt(profiles, args):
+    """Inscrit au manifeste ce qui est déjà présent pour des profils (extends compris) sans
+    avoir été installé par le gestionnaire : `uninstall` pourra ensuite le supprimer, et `sync`
+    changer la version (ref) de ses custom nodes. Les custom nodes livrés avec une image
+    (foreign_node) restent exclus."""
+    names = split_names(args.profiles)
+    if not names:
+        sys.exit("!! Indique au moins un profil (voir `list`)")
+    paths = Paths()
+    manifest = Manifest(paths, profiles)
+    try:
+        items = unmanaged_items(profiles, names, paths, manifest)
+    except ConfigError as e:
+        sys.exit(f"!! {e}")
+    if not args.dry_run and items:
+        for path, (kind, _, _) in items.items():
+            manifest.add(path, kind)
+        manifest.save()
+    if args.json:
+        print_json({"adopted": [{"kind": kind, "name": label} for kind, label, _ in items.values()],
+                    "dry_run": args.dry_run})
+        return 0
+    verb = "seraient pris" if args.dry_run else "pris"
+    print(f">> {', '.join(names)} : {len(items)} élément(s) {verb} en charge")
+    for kind, label, _ in items.values():
+        print(f"   {'[dry-run] ' if args.dry_run else ''}{kind:<12} {label}")
+    if items and not args.dry_run:
+        print(">> La désinstallation de ces profils pourra désormais les supprimer.")
     return 0
 
 
@@ -1144,6 +1200,11 @@ def main():
     sync = sub.add_parser("sync", help="installe ce qui manque pour des profils")
     sync.add_argument("profiles", nargs="?", help="défaut : $COMFY_PROFILES")
     sync.add_argument("--dry-run", action="store_true", help="affiche les actions sans rien faire")
+    adopt = sub.add_parser("adopt", help="prend en charge ce qui est déjà présent pour des profils "
+                                         "(uninstall pourra le supprimer)")
+    adopt.add_argument("profiles")
+    adopt.add_argument("--dry-run", action="store_true", help="affiche ce qui serait pris en charge")
+    adopt.add_argument("--json", action="store_true", help="sortie JSON")
     uninstall = sub.add_parser("uninstall", help="supprime ce qu'ont installé des profils (sauf ce qui sert encore)")
     uninstall.add_argument("profiles")
     uninstall.add_argument("--dry-run", action="store_true", help="affiche ce qui serait supprimé")
@@ -1161,7 +1222,8 @@ def main():
     print(f">> Config : {path}{note}", file=sys.stderr if as_json else sys.stdout)
     with contextlib.redirect_stdout(sys.stderr if as_json else sys.stdout):
         profiles = load_profiles(path, source)
-    commands = {"list": cmd_list, "show": cmd_show, "sync": cmd_sync, "uninstall": cmd_uninstall}
+    commands = {"list": cmd_list, "show": cmd_show, "sync": cmd_sync, "uninstall": cmd_uninstall,
+                "adopt": cmd_adopt}
     sys.exit(commands[args.command](profiles, args) or 0)
 
 

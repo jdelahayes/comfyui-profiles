@@ -41,6 +41,8 @@ const STYLE = `
 .cprof .chip { font-size: 11px; padding: 0 6px; border-radius: 8px; white-space: nowrap;
   background: var(--comfy-input-bg); border: 1px solid var(--border-color); }
 .cprof .chip.default { border-color: #3a9a5a; color: #3a9a5a; }
+.cprof .chip.unmanaged { border-color: #e0a030; color: #e0a030; border-style: dashed; }
+.cprof .legend .chip::before { display: none; }
 .cprof .details { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .cprof .item { display: flex; gap: 6px; font-size: 12px; font-family: monospace; }
 .cprof .item .name { flex: 1; word-break: break-all; }
@@ -205,6 +207,21 @@ class ProfilesPanel {
       toast("error", "Profils", e.message);
     }
     this.render();
+  }
+
+  // Prend en charge ce qui est déjà présent pour le profil : la désinstallation pourra le
+  // supprimer.
+  async adopt(name, count) {
+    if (!confirm(`Prendre en charge ${count} élément(s) déjà présent(s) pour ${name} (extends compris) ?\n\n` +
+                 "La désinstallation pourra ensuite les supprimer, y compris des custom nodes " +
+                 "installés avec le Manager ou des modèles copiés à la main.")) return;
+    try {
+      const { adopted } = await request("POST", "/adopt", { profiles: [name] });
+      toast("success", "Profils", `${name} : ${adopted.length} élément(s) pris en charge.`);
+    } catch (e) {
+      toast("error", "Profils", e.message);
+    }
+    await this.load();
   }
 
   confirmUninstall() {
@@ -396,7 +413,15 @@ class ProfilesPanel {
           this.data.default.includes(name) &&
             el("span", { class: "chip default", title: "Dans COMFY_PROFILES : synchronisé à chaque démarrage" }, "démarrage"),
           p.size && el("span", { class: "chip" }, p.size),
+          p.unmanaged > 0 && el("span", {
+            class: "chip unmanaged",
+            title: `${p.unmanaged} élément(s) présent(s), extends compris, mais pas installé(s) par ` +
+                   "le gestionnaire (Manager, copie à la main...) : la désinstallation les laisse en place.",
+          }, `${p.unmanaged} non pris en charge`),
           el("div", { class: "actions" },
+            p.unmanaged > 0 && iconButton("pi-link",
+              `Prendre en charge les ${p.unmanaged} élément(s) déjà présent(s) de ${name}…`,
+              locked, () => this.adopt(name, p.unmanaged)),
             iconButton("pi-download",
               state.install ? `Installer ${name} (ce qui manque)` : `${name} : ${state.label.toLowerCase()}`,
               locked || !state.install, () => this.startSync(false, "sync", [name])),
@@ -436,7 +461,9 @@ class ProfilesPanel {
       el("div", { class: "legend" },
         el("span", { class: "installed" }, "installé"),
         el("span", { class: "partial" }, "partiellement installé"),
-        el("span", {}, "non installé")),
+        el("span", {}, "non installé"),
+        el("span", { class: "chip unmanaged", title: "Présent, mais pas installé par le gestionnaire : " +
+                     "la désinstallation le laisse en place" }, "non pris en charge")),
       el("div", { class: "list" }, profiles),
       el("div", { class: "bar" },
         el("button", { class: "primary", disabled: locked || !selection.length,
@@ -481,7 +508,11 @@ class ProfilesPanel {
       detail.map((item) => el("div", { class: "item" },
         el("span", { class: item.missing ? "todo" : "ok" }, item.missing ? "✗" : "✓"),
         el("span", { class: "muted" }, item.kind),
-        el("span", { class: "name" }, item.name))));
+        el("span", { class: "name" }, item.name),
+        item.unmanaged && el("span", {
+          class: "chip unmanaged",
+          title: "Présent, mais pas installé par le gestionnaire : la désinstallation le laisse en place",
+        }, "non pris en charge"))));
   }
 }
 

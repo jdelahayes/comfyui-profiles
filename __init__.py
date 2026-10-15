@@ -137,6 +137,18 @@ async def uninstall_plan(request):
     return web.json_response(await cli_json("uninstall", ",".join(names), *extends))
 
 
+@routes.post(f"{API}/adopt")
+@writes
+async def adopt(request):
+    """Prend en charge ce qui est déjà présent pour des profils (voir comfy_profiles.cmd_adopt)."""
+    if job.running:
+        return json_error(409, "une action est déjà en cours")
+    names = profile_names((await request.json()).get("profiles"))
+    result = await cli_json("adopt", ",".join(names))
+    log.info("[comfy-profiles] %s : %d élément(s) pris en charge", ",".join(names), len(result["adopted"]))
+    return web.json_response(result)
+
+
 # --- Synchronisation / désinstallation -----------------------------------------------------
 
 class Job:

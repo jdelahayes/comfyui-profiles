@@ -148,6 +148,12 @@ VAE de `krea2-common`. Avec `--with-extends` (case « Inclure les profils hérit
 panneau), les profils hérités sont désinstallés aussi : c'est ce qu'il faut pour un profil qui
 ne fait que regrouper d'autres profils. Les paquets pip ne sont jamais supprimés.
 
+Pour qu'`uninstall` puisse quand même supprimer ce qui était déjà là, **prends-le en charge** :
+`adopt PROFIL` (bouton « lien » du profil dans le panneau) inscrit au manifeste tout ce qui
+est présent pour le profil, `extends` compris. Le panneau signale ce qui n'est pas encore pris
+en charge : pastille orange « N non pris en charge » sur le profil, et mention sur chaque
+élément dans son détail.
+
 Mise à jour depuis une version sans manifeste : si les custom nodes sont rangés à part
 (`COMFY_PROFILES_NODES_STORE`), ce qui est déjà présent pour les profils du fichier est repris
 dans le manifeste à la première utilisation (ce stockage n'est rempli que par le gestionnaire).
@@ -160,7 +166,8 @@ dans le manifeste à la première utilisation (ce stockage n'est rempli que par 
   pour « partiel », pas ceux hérités ; un profil qui ne fait que regrouper d'autres profils
   est partiel si l'un d'eux est installé ou partiel.
 - Boutons par profil : installer (s'il n'est pas complètement installé), désinstaller (s'il
-  l'est, même partiellement), détail de ce qui est présent ou non.
+  l'est, même partiellement), prendre en charge (s'il a des éléments non pris en charge),
+  détail de ce qui est présent ou non.
 - Synchronisation, dry-run ou désinstallation des profils cochés, avec les logs en direct.
   Une seule action à la fois ; **Arrêter** l'interrompt proprement (le téléchargement ou le
   clone en cours est abandonné sans laisser de fichier incomplet).
@@ -182,6 +189,7 @@ comfy_profiles.py [--config FICHIER] where                    # fichier utilisé
 comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
 comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
 comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
+comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
 profile_sizes.py [--config FICHIER] [--env FICHIER] [--force] [--dry-run]
 ```
 
@@ -220,7 +228,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.4 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.5 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
