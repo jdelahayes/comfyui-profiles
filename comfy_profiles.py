@@ -43,6 +43,7 @@ import argparse
 import contextlib
 import functools
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -375,12 +376,55 @@ def describe_source(item):
     return item["url"]
 
 
+def progress_class():
+    """Barre de progression tqdm toujours affichée. Sans terminal (panneau, logs du conteneur),
+    tqdm et huggingface_hub la masquent d'office : le téléchargement d'un gros fichier ne
+    montrerait rien pendant des minutes. Une mise à jour par seconde au plus ; le panneau
+    réécrit la ligne à chaque \r. Une seule barre à la fois, sur une seule ligne : la première
+    ouverte (huggingface_hub en ouvre deux pour Xet, la reconstruction du fichier en premier,
+    avec le pourcentage). None si tqdm n'est pas installé."""
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        return None
+
+    class Progress(tqdm):
+        active = False
+
+        def __init__(self, *args, **kwargs):
+            kwargs.pop("disable", None)
+            kwargs.pop("position", None)  # pas de déplacement du curseur (\x1b[A)
+            kwargs.setdefault("mininterval", 1)
+            kwargs.setdefault("ncols", 100)
+            self.owner = not Progress.active
+            Progress.active = True
+            super().__init__(*args, disable=not self.owner, **kwargs)
+
+        def close(self):
+            super().close()
+            if getattr(self, "owner", False):
+                self.owner = Progress.active = False
+
+    return Progress
+
+
 def fetch_url(url, dest):
     part = dest.with_name(dest.name + ".part")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp, part.open("wb") as out:
-            shutil.copyfileobj(resp, out, 16 * 1024 * 1024)
+            bar_class = progress_class()
+            total = int(resp.headers.get("Content-Length") or 0) or None
+            bar = bar_class(total=total, unit="B", unit_scale=True, unit_divisor=1024,
+                            desc=dest.name) if bar_class else None
+            try:
+                while chunk := resp.read(1024 * 1024):
+                    out.write(chunk)
+                    if bar:
+                        bar.update(len(chunk))
+            finally:
+                if bar:
+                    bar.close()
         part.replace(dest)
     finally:
         part.unlink(missing_ok=True)
@@ -392,12 +436,16 @@ def fetch(item, dest, paths):
         from huggingface_hub import hf_hub_download  # lit HF_TOKEN tout seul
 
         paths.staging.mkdir(parents=True, exist_ok=True)
+        options = {}
+        if "tqdm_class" in inspect.signature(hf_hub_download).parameters and progress_class():
+            options["tqdm_class"] = progress_class()
         try:
             downloaded = hf_hub_download(
                 repo_id=item["hf"],
                 filename=item["file"],
                 revision=item.get("revision"),
                 local_dir=paths.staging,
+                **options,
             )
             shutil.move(downloaded, dest)
         finally:

@@ -233,7 +233,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.3.8 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.3.9 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
