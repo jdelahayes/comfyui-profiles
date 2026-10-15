@@ -13,10 +13,12 @@ Content-Length pour une URL directe ou un fichier d'un dépôt GitHub. Seuls les
 Usage:
   profile_sizes.py [--config FICHIER] [--env FICHIER] [--force] [--dry-run]
 
-Fichier de config : --config, sinon $COMFY_PROFILES_CONFIG, sinon /opt/scripts/profiles.json
-(même règle que comfy_profiles.py). Token Hugging Face (dépôts gated) : $HF_TOKEN, sinon celui
-du fichier --env (ex. deploy/.env de runpod-comfy), sinon celui de `hf auth login`. Token
-CivitAI : $CIVITAI_TOKEN, sinon celui du fichier --env.
+Fichier de config : même règle que comfy_profiles.py (--config, $COMFY_PROFILES_CONFIG, fichier
+de l'utilisateur, modèle). Quand c'est le modèle (lecture seule), le résultat est écrit dans le
+fichier de l'utilisateur (<user>/__comfy_profiles/profiles.json), qui prend alors le relais.
+Token Hugging Face (dépôts gated) : $HF_TOKEN, sinon celui du fichier --env (un .env de
+déploiement par exemple), sinon celui de `hf auth login`. Token CivitAI : $CIVITAI_TOKEN, sinon
+celui du fichier --env.
 La mise en forme du fichier (un fichier par ligne, lignes vides entre profils) est conservée.
 Aussi lancé par le bouton « Recalculer les tailles » du panneau Profils.
 """
@@ -230,9 +232,9 @@ def main():
     args = parser.parse_args()
 
     load_env_tokens(args.env)
-    path = cp.config_path(args.config)
+    path, source = cp.config_source(args.config)
     print(f">> Config : {path}")
-    profiles = cp.load_profiles(path)
+    profiles = cp.load_profiles(path, source)
     text = path.read_text()
     data = json.loads(text)
     profiles = data["profiles"]  # mêmes objets que ceux modifiés ci-dessous
@@ -268,8 +270,10 @@ def main():
         print(">> --dry-run : fichier non modifié.")
     else:
         blank_before = set(re.findall(r'\n[ \t]*\n[ \t]*"([^"]+)"\s*:\s*\{', text))
-        path.write_text(format_config(data, blank_before), newline="\n")
-        print(f">> {path} mis à jour.")
+        out = cp.writable_config(path, source)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(format_config(data, blank_before), newline="\n")
+        print(f">> {out} mis à jour." if out == path else f">> {out} créé (le modèle {path} reste tel quel).")
     return 1 if failures else 0
 
 

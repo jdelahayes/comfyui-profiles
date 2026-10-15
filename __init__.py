@@ -1,16 +1,23 @@
-"""Panneau « Profils » dans ComfyUI : liste les profils d'utilisation (scripts/profiles.json),
-montre ce qui est déjà installé, lance (ou arrête) une synchronisation, une désinstallation ou
-le calcul des tailles avec ses logs en direct, édite le fichier de profils et redémarre ComfyUI.
+"""Panneau « Profils » dans ComfyUI : liste les profils d'utilisation (profiles.json), montre ce
+qui est déjà installé, lance (ou arrête) une synchronisation, une désinstallation ou le calcul
+des tailles avec ses logs en direct, édite, importe ou exporte le fichier de profils et
+redémarre ComfyUI.
 
 Aucun node dans le graphe : ce module ne fait qu'ajouter des routes HTTP au serveur ComfyUI et
 un onglet dans la barre latérale (web/profiles.js). Tout le travail est délégué à
 comfy_profiles.py (à côté de ce fichier, utilisable aussi en ligne de commande), lancé en
 sous-processus avec le Python de ComfyUI : les paquets pip
 s'installent ainsi dans le bon venv, et une erreur du script (sys.exit, pip...) ne peut pas
-faire tomber le serveur.
+faire tomber le serveur. Le script reçoit les chemins de ce ComfyUI (base, models, custom_nodes,
+user) par l'environnement : il travaille donc au même endroit que le serveur, quelle que soit la
+façon dont ComfyUI a été lancé (--base-directory, --user-directory...).
+
+COMFY_PROFILES_READONLY=1 : panneau en lecture seule (ni installation, ni désinstallation, ni
+modification du fichier de profils, ni redémarrage ; le dry-run reste possible).
 """
 import asyncio
 import codecs
+import functools
 import json
 import logging
 import os
@@ -19,6 +26,8 @@ import signal
 import sys
 from pathlib import Path
 
+import aiohttp
+import folder_paths
 from aiohttp import web
 from server import PromptServer
 
@@ -27,7 +36,6 @@ WEB_DIRECTORY = "./web"
 
 SCRIPT = Path(os.environ.get("COMFY_PROFILES_SCRIPT") or Path(__file__).parent / "comfy_profiles.py")
 SIZES_SCRIPT = Path(__file__).parent / "profile_sizes.py"
-IMAGE_CONFIG = Path("/opt/scripts/profiles.json")
 API = "/comfy-profiles"
 EVENT = "comfy-profiles.log"
 PROFILE_NAME = re.compile(r"[\w.-]+")
@@ -35,9 +43,38 @@ MAX_LOG_LINES = 5000
 ACTIONS = ("sync", "uninstall", "sizes")
 # Après SIGINT (arrêt propre), délai avant de tuer le script et ses sous-processus.
 STOP_TIMEOUT = 15
+# Import depuis une URL : taille maximale du fichier de profils.
+MAX_CONFIG_BYTES = 5 * 1024 * 1024
+READONLY = os.environ.get("COMFY_PROFILES_READONLY", "").lower() in ("1", "true", "yes")
 
 routes = PromptServer.instance.routes
 log = logging.getLogger("comfy-profiles")
+
+
+def cli_env():
+    """Environnement des scripts : les chemins de ce ComfyUI, tels que le serveur les voit."""
+    return {
+        **os.environ,
+        "PYTHONUNBUFFERED": "1",
+        "COMFY_HOME": folder_paths.base_path,
+        "COMFY_MODELS_DIR": folder_paths.models_dir,
+        "COMFY_CUSTOM_NODES_DIR": folder_paths.get_folder_paths("custom_nodes")[0],
+        "COMFY_USER_DIR": folder_paths.get_user_directory(),
+    }
+
+
+def json_error(status, message):
+    return web.json_response({"error": message}, status=status)
+
+
+def writes(handler):
+    """Route qui modifie l'installation ou le fichier de profils : refusée en lecture seule."""
+    @functools.wraps(handler)
+    async def guarded(request):
+        if READONLY:
+            return json_error(403, "panneau en lecture seule (COMFY_PROFILES_READONLY)")
+        return await handler(request)
+    return guarded
 
 
 async def run_cli(*args, config=None):
@@ -45,7 +82,7 @@ async def run_cli(*args, config=None):
     if config:
         cmd += ["--config", str(config)]
     proc = await asyncio.create_subprocess_exec(
-        *cmd, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        *cmd, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env())
     out, err = await proc.communicate()
     return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
@@ -78,7 +115,7 @@ def profile_names(value):
 
 @routes.get(f"{API}/profiles")
 async def list_profiles(_request):
-    return web.json_response(await cli_json("list"))
+    return web.json_response({**await cli_json("list"), "readonly": READONLY})
 
 
 @routes.get(f"{API}/status")
@@ -140,7 +177,7 @@ class Job:
         self.proc = await asyncio.create_subprocess_exec(
             sys.executable, *map(str, cmd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env=cli_env(),
             # Groupe de processus à part : en dernier recours, on tue aussi git, pip...
             start_new_session=True)
         asyncio.create_task(self.pump())
@@ -207,8 +244,11 @@ async def sync_start(request):
         return web.json_response({"error": f"action inconnue : {action}"}, status=400)
     if job.running:
         return web.json_response({"error": "une action est déjà en cours"}, status=409)
+    dry_run = bool(body.get("dry_run"))
+    if READONLY and not (dry_run and action != "sizes"):
+        return json_error(403, "panneau en lecture seule (COMFY_PROFILES_READONLY) : dry-run seulement")
     profiles = [] if action == "sizes" else profile_names(body.get("profiles"))
-    await job.start(action, profiles, bool(body.get("dry_run")))
+    await job.start(action, profiles, dry_run)
     return web.json_response(job.state())
 
 
@@ -223,32 +263,39 @@ async def sync_stop(_request):
 
 # --- Fichier de profils -------------------------------------------------------------------
 
-async def config_file():
-    # `list` crée au passage le fichier de COMFY_PROFILES_CONFIG s'il n'existe pas encore
-    # (copie de la config de l'image), on peut donc ensuite le lire.
-    return Path((await cli_json("list"))["config"])
+async def config_info():
+    """Fichier de profils actif, son origine (option, env, user, seed) et où l'enregistrer."""
+    # `where` ne lit pas le fichier : un fichier invalide peut ainsi être corrigé ou remplacé.
+    code, out, err = await run_cli("where")
+    if code != 0:
+        raise web.HTTPBadRequest(text=json.dumps({"error": cli_error(err)}),
+                                 content_type="application/json")
+    data = json.loads(out)
+    return Path(data["config"]), data["source"], Path(data["writable"])
 
 
 @routes.get(f"{API}/config")
 async def get_config(_request):
-    path = await config_file()
+    path, source, writable = await config_info()
     return web.json_response({
         "path": str(path),
-        "in_image": path.resolve() == IMAGE_CONFIG,
+        "source": source,
+        "writable": str(writable),
         "text": path.read_text(),
     })
 
 
-@routes.put(f"{API}/config")
-async def put_config(request):
-    text = (await request.json()).get("text", "")
+async def save_config(text, origin):
+    """Valide `text` sur une copie, puis remplace le fichier de profils modifiable (celui de
+    l'utilisateur quand le modèle était actif)."""
     try:
         names = list(json.loads(text).get("profiles") or {})
     except (json.JSONDecodeError, AttributeError) as e:
-        return web.json_response({"error": f"JSON invalide : {e}"}, status=400)
-    path = await config_file()
-    # Validé sur une copie avant de remplacer le fichier : `list` vérifie les clés des profils,
-    # `show` de tous les profils vérifie les extends et chaque modèle / custom node.
+        return json_error(400, f"JSON invalide : {e}")
+    _, _, path = await config_info()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # `list` vérifie les clés des profils, `show` de tous les profils vérifie les extends et
+    # chaque modèle / custom node.
     tmp = path.with_name(f".{path.name}.edit")
     tmp.write_text(text)
     try:
@@ -258,25 +305,77 @@ async def put_config(request):
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
-    log.info("[comfy-profiles] %s mis à jour depuis l'interface", path)
+    log.info("[comfy-profiles] %s mis à jour (%s)", path, origin)
     return web.json_response({"ok": True, "path": str(path)})
+
+
+@routes.put(f"{API}/config")
+@writes
+async def put_config(request):
+    body = await request.json()
+    return await save_config(body.get("text", ""), body.get("origin") or "édition dans le panneau")
+
+
+@routes.post(f"{API}/config/import-url")
+@writes
+async def import_config_url(request):
+    url = str((await request.json()).get("url") or "").strip()
+    if not url.startswith(("https://", "http://")):
+        return json_error(400, "URL http(s) attendue")
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers={"User-Agent": "comfyui-profiles"}) as resp:
+                if resp.status != 200:
+                    return json_error(400, f"{url} : HTTP {resp.status}")
+                body = await resp.content.read(MAX_CONFIG_BYTES + 1)
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        return json_error(400, f"{url} : {e or type(e).__name__}")
+    if len(body) > MAX_CONFIG_BYTES:
+        return json_error(400, f"{url} : fichier trop gros (plus de {MAX_CONFIG_BYTES // 1024 // 1024} Mo)")
+    return await save_config(body.decode("utf-8", errors="replace"), f"import de {url}")
+
+
+@routes.delete(f"{API}/config")
+@writes
+async def reset_config(_request):
+    """Revient au modèle : le fichier de l'utilisateur est mis de côté en profiles.json.bak."""
+    path, source, _ = await config_info()
+    if source != "user":
+        return json_error(409, "le fichier actif n'est pas celui de l'utilisateur, rien à réinitialiser")
+    backup = path.with_name(f"{path.name}.bak")
+    path.replace(backup)
+    log.info("[comfy-profiles] retour au modèle, ancien fichier gardé en %s", backup)
+    return web.json_response({"ok": True, "backup": str(backup)})
 
 
 # --- Redémarrage --------------------------------------------------------------------------
 
 def restart():
-    # Même PID (exec) : ComfyUI est le processus principal du conteneur (exec dans
-    # entrypoint.sh), le pod reste donc en vie ; SSH et JupyterLab ne sont pas touchés.
+    """Comme le redémarrage de ComfyUI-Manager : sous comfy-cli, on signale le redémarrage et on
+    quitte (comfy-cli relance) ; sinon, même PID (exec) : un conteneur dont ComfyUI est le
+    processus principal reste en vie."""
     log.info("[comfy-profiles] redémarrage de ComfyUI")
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
         except Exception:
             pass
-    os.execv(sys.executable, [sys.executable, *sys.argv])
+    if "__COMFY_CLI_SESSION__" in os.environ:
+        Path(os.environ["__COMFY_CLI_SESSION__"] + ".reboot").touch()
+        os._exit(0)
+    argv = [a for a in sys.argv if a != "--windows-standalone-build"]
+    if argv[0].endswith("__main__.py"):  # lancé en module (python -m ...)
+        cmd = [sys.executable, "-m", Path(argv[0]).parent.name, *argv[1:]]
+    elif sys.platform.startswith("win32"):
+        cmd = [f'"{sys.executable}"', f'"{argv[0]}"', *argv[1:]]
+    else:
+        cmd = [sys.executable, *argv]
+    os.execv(sys.executable, cmd)
 
 
 @routes.post(f"{API}/restart")
+@writes
 async def restart_comfy(_request):
     if job.running:
         return web.json_response({"error": "action en cours, redémarrage refusé"}, status=409)

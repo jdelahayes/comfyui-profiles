@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/jdelahayes/comfyui-profiles/main/profiles.schema.json",
+  "title": "Profils comfyui-profiles",
+  "description": "Fichier de profils d'utilisation ComfyUI : modèles, custom nodes, workflows et paquets pip de chaque usage. Les clés qui commencent par // sont des commentaires.",
+  "type": "object",
+  "required": ["profiles"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[\\w.-]+$"},
+      "additionalProperties": {"$ref": "#/$defs/profile"}
+    }
+  },
+  "patternProperties": {"^//": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "properties": {
+        "description": {"type": "string", "description": "Texte libre, affiché dans le panneau et par `list`."},
+        "size": {"type": "string", "description": "Taille totale, calculée par profile_sizes.py (informatif)."},
+        "extends": {
+          "type": "array",
+          "description": "Profils dont celui-ci reprend tout le contenu.",
+          "items": {"type": "string"}
+        },
+        "models": {"type": "array", "items": {"$ref": "#/$defs/model"}},
+        "workflows": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+        "custom_nodes": {"type": "array", "items": {"$ref": "#/$defs/custom_node"}},
+        "pip": {
+          "type": "array",
+          "description": "Paquets pip (spécifications pip install).",
+          "items": {"type": "string"}
+        }
+      },
+      "patternProperties": {"^//": {}},
+      "additionalProperties": false
+    },
+    "file": {
+      "type": "object",
+      "description": "Un fichier à télécharger, depuis une seule source : hf, github, civitai ou url.",
+      "properties": {
+        "hf": {"type": "string", "description": "Dépôt Hugging Face (org/depot), avec file."},
+        "github": {"type": "string", "description": "Dépôt GitHub public (owner/depot ou son URL), avec file. Seul le fichier est téléchargé."},
+        "civitai": {"type": "integer", "description": "Id de VERSION d'un modèle CivitAI (CIVITAI_TOKEN), avec name."},
+        "url": {"type": "string", "description": "URL directe, avec name."},
+        "file": {"type": "string", "description": "Chemin du fichier dans le dépôt (hf, github)."},
+        "revision": {"type": "string", "description": "Branche, tag ou commit (hf, github)."},
+        "name": {"type": "string", "description": "Nom du fichier local. Défaut : le nom de file (hf, github)."},
+        "size": {"type": "integer", "description": "Taille en octets, calculée par profile_sizes.py."}
+      },
+      "oneOf": [
+        {"required": ["hf", "file"]},
+        {"required": ["github", "file"]},
+        {"required": ["civitai", "name"]},
+        {"required": ["url", "name"]}
+      ],
+      "patternProperties": {"^//": {}}
+    },
+    "model": {
+      "allOf": [{"$ref": "#/$defs/file"}],
+      "required": ["type"],
+      "properties": {
+        "type": {"type": "string", "description": "Sous-dossier de models/ : checkpoints, loras, vae, diffusion_models, text_encoders... (peut contenir un sous-dossier, ex. diffusion_models/krea2)."}
+      }
+    },
+    "custom_node": {
+      "type": "object",
+      "properties": {
+        "git": {"type": "string", "description": "URL du dépôt git."},
+        "ref": {"type": "string", "description": "Branche, tag ou commit (git seulement)."},
+        "gdrive": {"type": "string", "description": "Zip public sur Google Drive (lien de partage ou id), avec name. Chiffré : GDRIVE_ZIP_PASSWORD."},
+        "name": {"type": "string", "description": "Nom du dossier dans custom_nodes/. Défaut : le nom du dépôt git."}
+      },
+      "oneOf": [
+        {"required": ["git"], "not": {"required": ["gdrive"]}},
+        {"required": ["gdrive", "name"], "not": {"anyOf": [{"required": ["git"]}, {"required": ["ref"]}]}}
+      ],
+      "patternProperties": {"^//": {}},
+      "additionalProperties": false
+    }
+  }
+}

@@ -89,7 +89,7 @@ class ProfilesPanel {
     this.expanded = new Map();  // profil -> état (`show --json`), ou null pendant le chargement
     this.sync = { running: false };
     this.logLines = new Map();  // index -> élément
-    this.editing = null;        // { path, in_image, text } en mode édition
+    this.editing = null;        // { path, source, writable, text } en mode édition
     this.uninstall = null;      // { profiles, plan } en attente de confirmation
     this.error = "";
     this.logBox = el("div", { class: "log" });
@@ -242,6 +242,61 @@ class ProfilesPanel {
     }
   }
 
+  // Remplace le fichier de profils par un fichier choisi sur le poste (même validation que
+  // l'édition : rien n'est remplacé si le fichier est invalide).
+  importFile() {
+    const input = el("input", { type: "file", accept: ".json,application/json" });
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      if (!file || !confirm(`Remplacer le fichier de profils par ${file.name} ?`)) return;
+      try {
+        await request("PUT", "/config", { text: await file.text(), origin: `import de ${file.name}` });
+        toast("success", "Profils", `${file.name} importé.`);
+        await this.load();
+      } catch (e) {
+        toast("error", "Profils", e.message);
+      }
+    });
+    input.click();
+  }
+
+  async importUrl() {
+    const url = prompt("URL du fichier de profils (ex. lien raw GitHub ou gist) :");
+    if (!url?.trim()) return;
+    try {
+      await request("POST", "/config/import-url", { url: url.trim() });
+      toast("success", "Profils", "Fichier de profils importé.");
+      await this.load();
+    } catch (e) {
+      toast("error", "Profils", e.message);
+    }
+  }
+
+  async exportFile() {
+    try {
+      const { text } = await request("GET", "/config");
+      const link = el("a", {
+        href: URL.createObjectURL(new Blob([text], { type: "application/json" })),
+        download: "profiles.json",
+      });
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch (e) {
+      toast("error", "Profils", e.message);
+    }
+  }
+
+  async resetToSeed() {
+    if (!confirm("Revenir au modèle ? Ton fichier de profils est gardé en profiles.json.bak.")) return;
+    try {
+      const { backup } = await request("DELETE", "/config");
+      toast("success", "Profils", `Modèle rétabli, ancien fichier : ${backup}`);
+      await this.load();
+    } catch (e) {
+      toast("error", "Profils", e.message);
+    }
+  }
+
   render() {
     this.root.replaceChildren(
       this.editing ? this.renderEditor() : this.uninstall ? this.renderUninstall() : this.renderMain());
@@ -263,7 +318,11 @@ class ProfilesPanel {
       plan.kept.length > 0 && el("div", { class: "details" },
         plan.kept.map((k) => item(k.kind, k.name, k.by.join(", ")))),
       plan.startup.length > 0 && el("div", { class: "warn" },
-        `${plan.startup.join(", ")} : dans COMFY_PROFILES, réinstallé(s) au prochain démarrage du pod.`),
+        `${plan.startup.join(", ")} : dans COMFY_PROFILES, réinstallé(s) au prochain démarrage.`),
+      plan.unmanaged.length > 0 && el("div", { class: "muted" },
+        "Laissés en place, car pas installés par le gestionnaire :"),
+      plan.unmanaged.length > 0 && el("div", { class: "details" },
+        plan.unmanaged.map((u) => item(u.kind, u.name))),
       plan.remove.some((r) => r.kind === "custom_node") && el("div", { class: "warn" },
         "Des custom nodes seront supprimés : redémarre ComfyUI ensuite pour les décharger."),
       el("div", { class: "muted" }, "Les paquets pip installés pour ces profils restent en place."),
@@ -280,9 +339,9 @@ class ProfilesPanel {
     return el("div", { class: "cprof-editor", style: "display:flex;flex-direction:column;gap:8px" },
       el("h3", {}, "Éditer les profils"),
       el("div", { class: "muted" }, this.editing.path),
-      this.editing.in_image && el("div", { class: "warn" },
-        "Ce fichier est celui de l'image : les modifications seront perdues avec le pod. " +
-        "Pour les garder, fais pointer COMFY_PROFILES_CONFIG vers le Network Volume."),
+      this.editing.source === "seed" && el("div", { class: "warn" },
+        `C'est le modèle, en lecture seule : l'enregistrement crée ton fichier de profils ` +
+        `(${this.editing.writable}), utilisé ensuite à sa place.`),
       area,
       this.editError && el("div", { class: "error" }, this.editError),
       el("div", { class: "bar" },
@@ -295,9 +354,18 @@ class ProfilesPanel {
     const running = this.sync.running;
     const header = el("div", {},
       el("h3", {}, "Profils"),
-      this.data && el("div", { class: "muted" }, this.data.config),
+      this.data && el("div", { class: "muted", title: this.data.config },
+        `${SOURCES[this.data.source] || this.data.source} : ${this.data.config}`),
+      this.data?.readonly && el("div", { class: "warn" },
+        "Lecture seule (COMFY_PROFILES_READONLY) : seul le dry-run est possible."),
       this.error && el("div", { class: "error" }, this.error));
-    if (!this.data) return el("div", {}, header, el("button", { onclick: () => this.load() }, "Recharger"));
+    // Fichier de profils invalide : on peut encore le corriger, le remplacer ou revenir au modèle.
+    if (!this.data) {
+      return el("div", { style: "display:flex;flex-direction:column;gap:10px" }, header,
+        el("div", { class: "bar" }, el("button", { onclick: () => this.load() }, "Recharger")),
+        this.configBar(running, null));
+    }
+    const locked = running || this.data.readonly;
 
     const profiles = Object.entries(this.data.profiles).map(([name, p]) => {
       const detail = this.expanded.get(name);
@@ -319,10 +387,10 @@ class ProfilesPanel {
           el("div", { class: "actions" },
             iconButton("pi-download",
               state.install ? `Installer ${name} (ce qui manque)` : `${name} : ${state.label.toLowerCase()}`,
-              running || !state.install, () => this.startSync(false, "sync", [name])),
+              locked || !state.install, () => this.startSync(false, "sync", [name])),
             iconButton("pi-trash",
               state.uninstall ? `Désinstaller ${name}…` : `${name} : ${state.label.toLowerCase()}`,
-              running || !state.uninstall, () => this.prepareUninstall([name])),
+              locked || !state.uninstall, () => this.prepareUninstall([name])),
             iconButton(this.expanded.has(name) ? "pi-chevron-down" : "pi-chevron-right",
               this.expanded.has(name) ? "Masquer le détail" : "Voir ce qui est installé",
               false, () => this.expand(name)))),
@@ -346,24 +414,24 @@ class ProfilesPanel {
       header,
       el("div", { class: "bar" },
         el("button", { onclick: () => this.load() }, "Recharger"),
-        el("button", { onclick: () => this.edit(), disabled: running }, "Éditer profiles.json"),
         el("button", {
-          onclick: () => this.startSync(false, "sizes", []), disabled: running,
+          onclick: () => this.startSync(false, "sizes", []), disabled: locked,
           title: "Interroge Hugging Face / CivitAI / GitHub (sans rien télécharger) pour les " +
                  "fichiers sans taille, et enregistre la taille de chaque profil dans profiles.json",
         }, "Recalculer les tailles"),
-        el("button", { onclick: () => this.restart(), disabled: running }, "Redémarrer ComfyUI")),
+        el("button", { onclick: () => this.restart(), disabled: locked }, "Redémarrer ComfyUI")),
+      this.configBar(locked, this.data),
       el("div", { class: "legend" },
         el("span", { class: "installed" }, "installé"),
         el("span", { class: "partial" }, "partiellement installé"),
         el("span", {}, "non installé")),
       el("div", { class: "list" }, profiles),
       el("div", { class: "bar" },
-        el("button", { class: "primary", disabled: running || !selection.length,
+        el("button", { class: "primary", disabled: locked || !selection.length,
                        onclick: () => this.startSync(false) },
           selection.length ? `Synchroniser (${selection.length})` : "Synchroniser"),
         el("button", { disabled: running || !selection.length, onclick: () => this.startSync(true) }, "Dry-run"),
-        el("button", { disabled: running || !selection.length, onclick: () => this.prepareUninstall() },
+        el("button", { disabled: locked || !selection.length, onclick: () => this.prepareUninstall() },
           "Désinstaller…"),
         running && el("button", { class: "danger", disabled: this.sync.stopping, onclick: () => this.stop() },
           this.sync.stopping ? "Arrêt…" : "Arrêter")),
@@ -372,6 +440,22 @@ class ProfilesPanel {
       status && el("div", { class: this.sync.returncode ? "error" : "muted" }, status),
       this.logBox,
     );
+  }
+
+  // `data` : résultat de `list --json`, ou null si le fichier de profils est illisible.
+  configBar(locked, data) {
+    return el("div", { class: "bar" },
+      el("span", { class: "muted" }, "profiles.json :"),
+      el("button", { onclick: () => this.edit(), disabled: locked }, "Éditer"),
+      el("button", { onclick: () => this.importFile(), disabled: locked,
+                     title: "Remplace le fichier de profils par un fichier de ton poste" }, "Importer…"),
+      el("button", { onclick: () => this.importUrl(), disabled: locked,
+                     title: "Remplace le fichier de profils par celui d'une URL" }, "Depuis une URL…"),
+      el("button", { onclick: () => this.exportFile() }, "Exporter"),
+      (!data || data.source === "user") && el("button", {
+        onclick: () => this.resetToSeed(), disabled: locked,
+        title: data ? `Remet en service le modèle (${data.seed})` : "Remet en service le modèle",
+      }, "Revenir au modèle"));
   }
 
   renderDetail(detail) {
@@ -398,8 +482,16 @@ const STATES = {
   installed: { label: "Installé", install: false, uninstall: true },
   partial: { label: "Partiellement installé", install: true, uninstall: true },
   missing: { label: "Non installé", install: true, uninstall: false },
-  empty: { label: "Aucun fichier à installer (pip ou custom nodes de l'image)", install: true, uninstall: false },
+  empty: { label: "Aucun fichier à installer (pip, ou custom nodes déjà présents hors gestionnaire)", install: true, uninstall: false },
   error: { label: "Config invalide", install: false, uninstall: false },
+};
+
+// Origine du fichier de profils actif (`list --json`).
+const SOURCES = {
+  option: "Fichier (--config)",
+  env: "Fichier (COMFY_PROFILES_CONFIG)",
+  user: "Ton fichier",
+  seed: "Modèle (lecture seule)",
 };
 
 // Petit bouton icône seule (PrimeIcons, fournies par le frontend ComfyUI) ; l'action est
@@ -419,7 +511,7 @@ function formatSize(bytes) {
 let panel = null;
 
 app.registerExtension({
-  name: "runpod-comfy.profiles",
+  name: "comfyui-profiles.panel",
   setup() {
     if (!app.extensionManager?.registerSidebarTab) {
       console.warn("[comfy-profiles] registerSidebarTab indisponible dans ce frontend");

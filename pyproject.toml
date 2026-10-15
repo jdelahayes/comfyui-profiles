@@ -1,0 +1,18 @@
+[project]
+name = "comfyui-profiles"
+description = "Profils d'utilisation pour ComfyUI : installe, vérifie et désinstalle depuis la barre latérale les modèles, custom nodes, workflows et paquets pip d'un usage, décrits dans un profiles.json."
+version = "0.3.0"
+requires-python = ">=3.10"
+# huggingface_hub : téléchargements depuis Hugging Face (déjà présent avec ComfyUI).
+# pyzipper (zips Drive chiffrés) est installé à la demande.
+dependencies = ["huggingface_hub"]
+
+[project.urls]
+Repository = "https://github.com/jdelahayes/comfyui-profiles"
+
+# Comfy Registry (https://registry.comfy.org) : PublisherId à vérifier, c'est l'identifiant du
+# publisher créé sur le registry.
+[tool.comfy]
+PublisherId = "jdelahayes"
+DisplayName = "Profiles"
+Icon = ""

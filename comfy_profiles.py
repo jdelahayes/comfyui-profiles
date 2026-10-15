@@ -1,35 +1,41 @@
 #!/usr/bin/env python3
-"""Profils d'utilisation ComfyUI (minimax-h3-all-pruned_int8, flux2-klein-9b, ...) : chaque profil décrit les
+"""Profils d'utilisation ComfyUI : chaque profil décrit les
 modèles, custom nodes, workflows et paquets pip dont il a besoin. `sync` installe ce qui
-manque et ne touche jamais à ce qui est déjà présent — relançable à volonté (c'est ce que fait
-entrypoint.sh à chaque démarrage du pod pour les profils de COMFY_PROFILES).
+manque et ne touche jamais à ce qui est déjà présent — relançable à volonté (par exemple à
+chaque démarrage d'un conteneur, pour les profils de COMFY_PROFILES).
 
 Usage:
   comfy_profiles.py [--config FICHIER] list [--json]
+  comfy_profiles.py [--config FICHIER] where
   comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
   comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
   comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--dry-run] [--json]
 
-Fichier de config : --config, sinon $COMFY_PROFILES_CONFIG, sinon /opt/scripts/profiles.json
-(embarqué dans l'image). S'il pointe vers un fichier absent (ex: sur le Network Volume), la
-config de l'image y est d'abord copiée, pour être éditée ensuite.
+Fichier de profils, le premier trouvé :
+  1. --config FICHIER
+  2. $COMFY_PROFILES_CONFIG (s'il est absent, le modèle y est d'abord copié)
+  3. <user>/__comfy_profiles/profiles.json : celui qu'écrivent l'édition et l'import du panneau
+  4. le modèle, en lecture seule : $COMFY_PROFILES_SEED, sinon examples/profiles.example.json
 Profils synchronisés par défaut : $COMFY_PROFILES (séparés par des virgules).
 `uninstall` supprime les modèles, workflows et custom nodes de profils, sauf ceux dont a encore
-besoin un autre profil installé (voir cmd_uninstall). Les paquets pip restent dans le venv.
+besoin un autre profil installé (voir cmd_uninstall) et ceux que le gestionnaire n'a pas
+installés lui-même (voir Manifest). Les paquets pip restent dans le venv.
 Ctrl+C (SIGINT) interrompt proprement `sync` : le téléchargement ou le clone en cours est
 abandonné sans laisser de fichier incomplet, la prochaine synchro le reprendra.
 --json (list, show, uninstall) : résultat en JSON sur stdout, messages d'information sur stderr (utilisé
 par le panneau Profils dans ComfyUI, voir __init__.py).
 
-Destinations :
-  modèles      -> $MODELS_VOLUME_DIR/<type>/  (ou $COMFY_HOME/models/<type>/ sans volume)
-  custom nodes -> <volume>/custom_nodes/<nom>, lié dans $COMFY_HOME/custom_nodes/
-                  (ou directement dans $COMFY_HOME/custom_nodes/ sans volume) ; clonés depuis
-                  git, ou extraits d'un zip public sur Google Drive (chiffré ou non : mot de
-                  passe dans $GDRIVE_ZIP_PASSWORD)
-  workflows    -> $COMFY_HOME/user/default/workflows/
-Les dépendances Python (custom nodes, pip) vivent dans le venv du conteneur : elles sont
-réinstallées automatiquement sur un nouveau pod, même si le volume est déjà peuplé.
+Destinations (le panneau passe les chemins de ComfyUI lui-même ; en ligne de commande, ils se
+déduisent de $COMFY_HOME, sinon du ComfyUI dont ce dépôt est un custom node) :
+  modèles      -> $COMFY_MODELS_DIR/<type>/            (défaut : $COMFY_HOME/models)
+  custom nodes -> $COMFY_PROFILES_NODES_STORE/<nom>, lié dans $COMFY_CUSTOM_NODES_DIR/
+                  (défaut : directement dans $COMFY_HOME/custom_nodes/) ; clonés depuis git,
+                  ou extraits d'un zip public sur Google Drive (chiffré ou non : mot de passe
+                  dans $GDRIVE_ZIP_PASSWORD)
+  workflows    -> $COMFY_USER_DIR/default/workflows/   (défaut : $COMFY_HOME/user)
+Les dépendances Python (custom nodes, pip) sont installées dans le Python qui lance ce script
+et notées dans son environnement (venv) : un nouveau conteneur les réinstalle, même si les
+custom nodes sont déjà sur un volume persistant.
 """
 import argparse
 import contextlib
@@ -45,14 +51,21 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-DEFAULT_CONFIG = Path("/opt/scripts/profiles.json")
+HERE = Path(__file__).resolve().parent
+EXAMPLE_CONFIG = HERE / "examples" / "profiles.example.json"
+# Dossier « System User » de ComfyUI (préfixe __) : jamais servi par ses routes HTTP
+# (/api/userdata...), seul ce module y lit et écrit. Contient le fichier de profils de
+# l'utilisateur et le manifeste de ce qui a été installé.
+DATA_DIR_NAME = "__comfy_profiles"
+CONFIG_NAME = "profiles.json"
+MANIFEST_NAME = "installed.json"
 SECTIONS = ("custom_nodes", "pip", "models", "workflows")
 # "size" : total calculé par profile_sizes.py (informatif, ignoré par sync).
 PROFILE_KEYS = {"description", "size", "extends", *SECTIONS}
 SOURCES = ("hf", "github", "url", "civitai")
 # Cloudflare (devant civitai.com notamment) rejette le User-Agent par défaut de urllib.
-USER_AGENT = "runpod-comfy-profiles"
-# Dans le venv, donc propre à ce conteneur : un nouveau pod réinstalle les dépendances.
+USER_AGENT = "comfyui-profiles"
+# Dans le venv, donc propre à ce conteneur : un nouveau conteneur réinstalle les dépendances.
 MARKER_DIR = Path(sys.prefix) / ".comfy-profiles"
 
 
@@ -64,36 +77,67 @@ def env_path(name, default):
     return Path(os.environ.get(name) or default)
 
 
+def default_comfy_home():
+    """Le ComfyUI dont ce dépôt est un custom node (<ComfyUI>/custom_nodes/comfyui-profiles)."""
+    return HERE.parent.parent if HERE.parent.name == "custom_nodes" else None
+
+
 class Paths:
     def __init__(self):
-        self.comfy_home = env_path("COMFY_HOME", "/workspace/ComfyUI")
-        models_volume = env_path("MODELS_VOLUME_DIR", "/runpod-volume/models")
-        volume_root = models_volume.parent
-        has_volume = volume_root.is_dir()
-        self.models = models_volume if has_volume else self.comfy_home / "models"
-        self.custom_nodes = self.comfy_home / "custom_nodes"
-        self.custom_nodes_store = volume_root / "custom_nodes" if has_volume else self.custom_nodes
-        self.workflows = self.comfy_home / "user" / "default" / "workflows"
-        # Hors des sous-dossiers <type>/ : jamais scanné par ComfyUI ni lié par entrypoint.sh.
+        home = os.environ.get("COMFY_HOME") or default_comfy_home()
+        if not home:
+            sys.exit("!! Dossier de ComfyUI inconnu : indique-le dans COMFY_HOME")
+        self.comfy_home = Path(home)
+        self.models = env_path("COMFY_MODELS_DIR", self.comfy_home / "models")
+        self.custom_nodes = env_path("COMFY_CUSTOM_NODES_DIR", self.comfy_home / "custom_nodes")
+        # Ailleurs que custom_nodes/ (ex. un volume persistant) : chaque node y est cloné puis
+        # lié dans custom_nodes/.
+        self.custom_nodes_store = env_path("COMFY_PROFILES_NODES_STORE", self.custom_nodes)
+        self.user = env_path("COMFY_USER_DIR", self.comfy_home / "user")
+        self.workflows = self.user / "default" / "workflows"
+        self.data = self.user / DATA_DIR_NAME
+        # Hors des sous-dossiers <type>/ : jamais scanné par ComfyUI.
         self.staging = self.models / ".staging"
 
 
 # --- Config -------------------------------------------------------------------------------
 
-def config_path(arg):
-    return Path(arg or os.environ.get("COMFY_PROFILES_CONFIG") or DEFAULT_CONFIG)
+def seed_config():
+    """Modèle de fichier de profils : celui que fournit l'environnement (ex. une image Docker),
+    sinon l'exemple de ce dépôt."""
+    return Path(os.environ.get("COMFY_PROFILES_SEED") or EXAMPLE_CONFIG)
+
+
+def config_source(arg):
+    """(fichier de profils, origine) ; origine : option (--config), env
+    (COMFY_PROFILES_CONFIG), user (<user>/__comfy_profiles) ou seed (modèle, lecture seule)."""
+    if arg:
+        return Path(arg), "option"
+    if os.environ.get("COMFY_PROFILES_CONFIG"):
+        return Path(os.environ["COMFY_PROFILES_CONFIG"]), "env"
+    user = Paths().data / CONFIG_NAME
+    if user.is_file():
+        return user, "user"
+    return seed_config(), "seed"
+
+
+def writable_config(path, source):
+    """Où enregistrer une modification : jamais dans le modèle, mais dans le fichier de
+    l'utilisateur, qui prend alors le relais."""
+    return Paths().data / CONFIG_NAME if source == "seed" else path
 
 
 def is_comment(key):
     return key.startswith("//")
 
 
-def load_profiles(path):
+def load_profiles(path, source="option"):
     if not path.is_file():
-        if path != DEFAULT_CONFIG and DEFAULT_CONFIG.is_file():
+        seed = seed_config()
+        if source in ("option", "env") and path != seed and seed.is_file():
             path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(DEFAULT_CONFIG, path)
-            print(f">> {path} absent : copie de la config par défaut de l'image ({DEFAULT_CONFIG}).")
+            shutil.copy(seed, path)
+            print(f">> {path} absent : copie du modèle ({seed}).")
         else:
             sys.exit(f"!! Fichier de config introuvable : {path}")
     try:
@@ -253,9 +297,65 @@ def touch(path):
 # --- Plan ---------------------------------------------------------------------------------
 
 class Step:
-    def __init__(self, label, run):
+    """`record` : (chemin, genre) à inscrire au manifeste une fois l'étape réussie."""
+
+    def __init__(self, label, run, record=None):
         self.label = label
         self.run = run
+        self.record = record
+
+
+class Manifest:
+    """Ce que le gestionnaire a installé lui-même (custom nodes, modèles, workflows), dans
+    <user>/__comfy_profiles/installed.json. Seuls ces éléments sont supprimés par `uninstall`,
+    et seuls ces custom nodes changent de version quand `ref` change : un fichier ou un node déjà
+    là avant (installé à la main, livré avec ComfyUI ou une image Docker) n'est jamais touché.
+
+    Sans manifeste (première utilisation de cette version), si les custom nodes sont rangés à
+    part (COMFY_PROFILES_NODES_STORE), ce qui est déjà présent pour les profils du fichier est
+    repris : ce stockage n'est rempli que par le gestionnaire, et c'était le comportement des
+    versions précédentes. Sinon, on part d'un manifeste vide."""
+
+    def __init__(self, paths, profiles):
+        self.file = paths.data / MANIFEST_NAME
+        self.adopted = False
+        if self.file.is_file():
+            try:
+                self.items = json.loads(self.file.read_text()).get("items") or {}
+            except (json.JSONDecodeError, AttributeError) as e:
+                sys.exit(f"!! {self.file} : JSON invalide ({e})")
+        else:
+            self.items = adopt_existing(profiles, paths) if paths.custom_nodes_store != paths.custom_nodes else {}
+            self.adopted = bool(self.items)
+
+    def __contains__(self, path):
+        return str(path) in self.items
+
+    def add(self, path, kind):
+        self.items[str(path)] = kind
+
+    def discard(self, path):
+        self.items.pop(str(path), None)
+
+    def save(self):
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.file.with_name(f".{self.file.name}.tmp")
+        tmp.write_text(json.dumps({"version": 1, "items": dict(sorted(self.items.items()))},
+                                  ensure_ascii=False, indent=1) + "\n")
+        tmp.replace(self.file)
+
+
+def adopt_existing(profiles, paths):
+    items = {}
+    for name in profiles:
+        try:
+            targets = installed_by(resolve(profiles, [name]), paths)
+        except (ConfigError, SystemExit):
+            continue
+        for path, (kind, _, link) in targets.items():
+            if present(path, link):
+                items[str(path)] = kind
+    return items
 
 
 def file_dest(item, where, section, paths):
@@ -272,10 +372,11 @@ def file_label(item, section, dest):
     return f"{item['type']}/{dest.name}" if section == "models" else f"workflow/{dest.name}"
 
 
-def plan_file(item, dest, paths):
+def plan_file(item, dest, kind, paths):
     if dest.exists():
         return None
-    return Step(f"{describe_source(item)} -> {dest}", lambda: fetch(item, dest, paths))
+    return Step(f"{describe_source(item)} -> {dest}", lambda: fetch(item, dest, paths),
+                record=(dest, kind))
 
 
 def git(store, *args, **kwargs):
@@ -326,10 +427,10 @@ def extract_encrypted_zip(archive, dest, file_id):
     password = os.environ.get("GDRIVE_ZIP_PASSWORD")
     if not password:
         raise RuntimeError(f"le zip Drive {file_id} est chiffré : mot de passe attendu dans "
-                           "GDRIVE_ZIP_PASSWORD (secret RunPod gdrive_zip_password)")
+                           "GDRIVE_ZIP_PASSWORD")
     try:
         import pyzipper
-    except ImportError:  # image antérieure à l'ajout de pyzipper dans le Dockerfile
+    except ImportError:  # pas installé d'avance : seulement utile aux zips chiffrés
         pip_install(["pyzipper"])
         import pyzipper
     with pyzipper.AESZipFile(archive) as zf:
@@ -380,13 +481,15 @@ def custom_node_name(item, where):
     return item["git"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
 
 
-def in_image(name, paths):
-    """Custom node livré avec l'image (dossier réel, pas un lien vers le volume)."""
+def foreign_node(name, paths):
+    """Custom node déjà dans custom_nodes/ en vrai dossier alors que le gestionnaire range les
+    siens ailleurs (COMFY_PROFILES_NODES_STORE) : livré avec une image Docker ou installé à la
+    main. Jamais touché, et ignoré dans l'état des profils."""
     link, store = paths.custom_nodes / name, paths.custom_nodes_store / name
     return link.exists() and not link.is_symlink() and link != store
 
 
-def plan_custom_node(item, where, paths):
+def plan_custom_node(item, where, paths, manifest):
     url = item.get("git")
     drive = item.get("gdrive")
     if bool(url) == bool(drive):
@@ -402,21 +505,23 @@ def plan_custom_node(item, where, paths):
     link = paths.custom_nodes / name
     steps = []
 
-    if in_image(name, paths):
-        print(f"   [{name}] déjà présent dans l'image ({link}), version du profil ignorée")
+    if foreign_node(name, paths):
+        print(f"   [{name}] déjà présent ({link}), hors gestionnaire : version du profil ignorée")
         return name, steps
 
     ref = item.get("ref")
+    managed = store in manifest
+    record = (store, "custom_node")
     if drive:
         installed = store / GDRIVE_MARKER
         if not store.exists():
             steps.append(Step(f"gdrive:{file_id} (zip) -> {store}",
-                              lambda: install_gdrive_zip(file_id, store, paths)))
-        elif not installed.is_file():
-            print(f"   [{name}] {store} existe mais ne vient pas d'un zip Drive, laissé tel quel")
+                              lambda: install_gdrive_zip(file_id, store, paths), record))
+        elif not installed.is_file() or not managed:
+            print(f"   [{name}] {store} existe mais n'a pas été installé depuis Drive par le gestionnaire, laissé tel quel")
         elif installed.read_text().strip() != file_id:
             steps.append(Step(f"gdrive:{file_id} (zip, nouveau fichier) remplace {store}",
-                              lambda: install_gdrive_zip(file_id, store, paths)))
+                              lambda: install_gdrive_zip(file_id, store, paths), record))
     elif not store.exists():
         def clone():
             try:
@@ -438,12 +543,17 @@ def plan_custom_node(item, where, paths):
             else:
                 subprocess.run(["git", "clone", "--depth", "1", url, str(store)], check=True)
 
-        steps.append(Step(f"git clone {url}{'@' + ref if ref else ''} -> {store}", clone))
+        steps.append(Step(f"git clone {url}{'@' + ref if ref else ''} -> {store}", clone, record))
     elif ref and not at_ref(store, ref):
-        steps.append(Step(f"git checkout {ref} dans {store}", lambda: checkout_ref(store, ref)))
+        if managed:
+            steps.append(Step(f"git checkout {ref} dans {store}", lambda: checkout_ref(store, ref)))
+        else:
+            print(f"   [{name}] {store} n'a pas été installé par le gestionnaire : ref {ref} ignorée")
 
     if link != store and not link.is_symlink():
         def make_link():
+            if not store.exists():  # clone ou extraction raté juste avant : pas de lien mort
+                raise RuntimeError(f"{store} absent, lien non créé")
             link.parent.mkdir(parents=True, exist_ok=True)
             link.symlink_to(store)
 
@@ -475,14 +585,14 @@ def plan_custom_node(item, where, paths):
     return name, steps
 
 
-def build_plan(merged, paths):
+def build_plan(merged, paths, manifest):
     """Retourne (étapes à exécuter, état de chaque élément : (genre, nom, à installer ?)).
     Valide toute la config avant d'agir."""
     steps, status, seen = [], [], set()
 
     for profile, item in merged["custom_nodes"]:
         where = f"[{profile}] custom_nodes"
-        name, node_steps = plan_custom_node(item, where, paths)
+        name, node_steps = plan_custom_node(item, where, paths, manifest)
         if name in seen:
             continue
         seen.add(name)
@@ -510,7 +620,7 @@ def build_plan(merged, paths):
             if dest in seen:
                 continue
             seen.add(dest)
-            step = plan_file(item, dest, paths)
+            step = plan_file(item, dest, section[:-1], paths)
             status.append((section[:-1], file_label(item, section, dest), bool(step)))
             if step:
                 steps.append(step)
@@ -531,7 +641,7 @@ def profile_state(profiles, name, paths, memo=None):
     pas « partiels » les profils qui en héritent. Un profil sans élément propre, qui ne fait
     que regrouper d'autres profils (ex. minimax-h3-all-*), est partial si l'un de ses parents
     directs est installé ou partiel. empty : n'installe aucun fichier (pip seul, ou seulement
-    des custom nodes de l'image). error : config invalide."""
+    des custom nodes hors gestionnaire, voir foreign_node). error : config invalide."""
     memo = {} if memo is None else memo
     if name in memo:
         return memo[name]
@@ -555,11 +665,21 @@ def profile_state(profiles, name, paths, memo=None):
     return memo.setdefault(name, state)
 
 
+def config_location(arg):
+    path, source = config_source(arg)
+    return {
+        "config": str(path.absolute()),
+        "source": source,
+        "writable": str(writable_config(path, source).absolute()),
+        "seed": str(seed_config().absolute()),
+    }
+
+
 def cmd_list(profiles, args):
     if args.json:
         paths, states = Paths(), {}
         print_json({
-            "config": str(config_path(args.config).absolute()),
+            **config_location(args.config),
             "default": split_names(os.environ.get("COMFY_PROFILES")),
             "profiles": {
                 name: {
@@ -594,7 +714,8 @@ def cmd_show(profiles, args):
         # Les messages de build_plan (custom nodes laissés tels quels...) ne doivent pas
         # polluer le JSON.
         with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
-            _, status = build_plan(resolve(profiles, names), Paths())
+            paths = Paths()
+            _, status = build_plan(resolve(profiles, names), paths, Manifest(paths, profiles))
     except ConfigError as e:
         sys.exit(f"!! {e}")
     if args.json:
@@ -613,8 +734,9 @@ def cmd_sync(profiles, args):
         print(">> Aucun profil demandé (argument ou COMFY_PROFILES), rien à faire.")
         return 0
     paths = Paths()
+    manifest = Manifest(paths, profiles)
     try:
-        steps, _ = build_plan(resolve(profiles, names), paths)
+        steps, _ = build_plan(resolve(profiles, names), paths, manifest)
     except ConfigError as e:
         sys.exit(f"!! {e}")
 
@@ -626,6 +748,9 @@ def cmd_sync(profiles, args):
         for step in steps:
             print(f"   [dry-run] {step.label}")
         return 0
+    if manifest.adopted:
+        manifest.save()
+        print(f">> {manifest.file} créé : {len(manifest.items)} élément(s) déjà présent(s) repris.")
     print(">> HF_TOKEN détecté." if os.environ.get("HF_TOKEN") else ">> Pas de HF_TOKEN : téléchargements HF anonymes.")
 
     failures = []
@@ -633,6 +758,9 @@ def cmd_sync(profiles, args):
         print(f">> ({i}/{len(steps)}) {step.label}", flush=True)
         try:
             step.run()
+            if step.record:
+                manifest.add(*step.record)
+                manifest.save()
         except KeyboardInterrupt:
             print(f"!! Synchronisation interrompue ({i - 1}/{len(steps)} action(s) faite(s)).",
                   file=sys.stderr)
@@ -654,11 +782,11 @@ def cmd_sync(profiles, args):
 
 def installed_by(merged, paths):
     """Ce qu'installent des profils : {chemin: (genre, nom, lien du custom node ou None)}.
-    Les custom nodes de l'image n'en font pas partie : jamais supprimés."""
+    Les custom nodes hors gestionnaire (foreign_node) n'en font pas partie."""
     targets = {}
     for profile, item in merged["custom_nodes"]:
         name = custom_node_name(item, f"[{profile}] custom_nodes")
-        if not in_image(name, paths):
+        if not foreign_node(name, paths):
             targets.setdefault(paths.custom_nodes_store / name,
                                ("custom_node", name, paths.custom_nodes / name))
     for section in ("models", "workflows"):
@@ -720,12 +848,12 @@ def remove(path, link, paths):
         parent = parent.parent
 
 
-def plan_uninstall(profiles, names, paths):
+def plan_uninstall(profiles, names, paths, manifest):
     """Ce que supprime la désinstallation de `names`. Un élément est conservé s'il sert encore à
     un profil qu'on garde : un profil de COMFY_PROFILES (réinstallé à chaque démarrage), ou un
     autre profil complètement installé. Les profils dont héritent ceux qu'on désinstalle ne
     comptent pas (ils sont forcément installés) : leurs éléments partent, sauf s'ils servent à
-    un profil gardé."""
+    un profil gardé. Ce que le gestionnaire n'a pas installé (absent du manifeste) reste."""
     startup = split_names(os.environ.get("COMFY_PROFILES"))
     inherited = ancestors(profiles, names)
     targets = installed_by(resolve(profiles, names), paths)
@@ -743,18 +871,21 @@ def plan_uninstall(profiles, names, paths):
         for path in installed_by(resolve(profiles, [name]), paths):
             needed.setdefault(path, []).append(name)
 
-    removed, kept = [], []
+    removed, kept, unmanaged = [], [], []
     for path, (kind, label, link) in targets.items():
         if not present(path, link):
             continue
         if path in needed:
             kept.append({"kind": kind, "name": label, "by": needed[path]})
+        elif path not in manifest:
+            unmanaged.append({"kind": kind, "name": label})
         else:
             removed.append({"kind": kind, "name": label, "size": disk_size(path),
                             "path": path, "link": link})
     return {
         "remove": removed,
         "kept": kept,
+        "unmanaged": unmanaged,
         # Seulement ceux qui protègent effectivement quelque chose.
         "keep_profiles": [n for n in keep if any(n in k["by"] for k in kept)],
         "startup": [n for n in names if n in startup],
@@ -766,8 +897,9 @@ def cmd_uninstall(profiles, args):
     if not names:
         sys.exit("!! Indique au moins un profil (voir `list`)")
     paths = Paths()
+    manifest = Manifest(paths, profiles)
     try:
-        plan = plan_uninstall(profiles, names, paths)
+        plan = plan_uninstall(profiles, names, paths, manifest)
     except ConfigError as e:
         sys.exit(f"!! {e}")
     removed = plan["remove"]
@@ -786,11 +918,15 @@ def cmd_uninstall(profiles, args):
         print(f">> Profils gardés (leurs éléments ne sont pas supprimés) : {', '.join(plan['keep_profiles'])}")
     for k in plan["kept"]:
         print(f"   conservé  {k['kind']:<12} {k['name']}  (utilisé par {', '.join(k['by'])})")
+    for u in plan["unmanaged"]:
+        print(f"   conservé  {u['kind']:<12} {u['name']}  (pas installé par le gestionnaire)")
     for name in plan["startup"]:
-        print(f"!! {name} est dans COMFY_PROFILES : il sera réinstallé au prochain démarrage du pod.")
+        print(f"!! {name} est dans COMFY_PROFILES : il sera réinstallé au prochain démarrage.")
     if not removed:
         print(">> Rien à supprimer.")
         return 0
+    if manifest.adopted and not args.dry_run:
+        manifest.save()
 
     for i, r in enumerate(removed, 1):
         label = f"{r['kind']:<12} {r['name']}  ({human_size(r['size'])})"
@@ -800,6 +936,8 @@ def cmd_uninstall(profiles, args):
         print(f">> ({i}/{len(removed)}) supprimer {label}", flush=True)
         try:
             remove(r["path"], r["link"], paths)
+            manifest.discard(r["path"])
+            manifest.save()
         except KeyboardInterrupt:
             print(f"!! Désinstallation interrompue ({i - 1}/{len(removed)} supprimé(s)).", file=sys.stderr)
             return 130
@@ -819,10 +957,12 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--config", help="fichier de profils (défaut : $COMFY_PROFILES_CONFIG ou la config de l'image)")
+    parser.add_argument("--config", help="fichier de profils (défaut : $COMFY_PROFILES_CONFIG, "
+                                         "<user>/__comfy_profiles/profiles.json, sinon le modèle)")
     sub = parser.add_subparsers(dest="command", required=True)
     lst = sub.add_parser("list", help="liste les profils disponibles")
     lst.add_argument("--json", action="store_true", help="sortie JSON")
+    sub.add_parser("where", help="fichier de profils utilisé, son origine et où l'enregistrer (JSON, sans le lire)")
     show = sub.add_parser("show", help="détaille ce qu'installent des profils, et ce qui est déjà là")
     show.add_argument("profiles")
     show.add_argument("--json", action="store_true", help="sortie JSON")
@@ -834,12 +974,16 @@ def main():
     uninstall.add_argument("--dry-run", action="store_true", help="affiche ce qui serait supprimé")
     uninstall.add_argument("--json", action="store_true", help="sortie JSON (implique --dry-run)")
     args = parser.parse_args()
+    if args.command == "where":
+        print_json(config_location(args.config))
+        return
 
-    path = config_path(args.config)
+    path, source = config_source(args.config)
     as_json = getattr(args, "json", False)
-    print(f">> Config : {path}", file=sys.stderr if as_json else sys.stdout)
+    note = " (modèle, lecture seule)" if source == "seed" else ""
+    print(f">> Config : {path}{note}", file=sys.stderr if as_json else sys.stdout)
     with contextlib.redirect_stdout(sys.stderr if as_json else sys.stdout):
-        profiles = load_profiles(path)
+        profiles = load_profiles(path, source)
     commands = {"list": cmd_list, "show": cmd_show, "sync": cmd_sync, "uninstall": cmd_uninstall}
     sys.exit(commands[args.command](profiles, args) or 0)
 
