@@ -272,7 +272,6 @@
   "{source} : vérification de {path}": "{source}: checking {path}",
   "gdrive:{id} (zip) : mise à jour de {path}": "gdrive:{id} (zip): updating {path}",
   "{path} n'a pas été installé par le gestionnaire : pas de mise à jour (adopt pour le prendre en charge)": "{path} was not installed by the manager: not updated (adopt to take it over)",
-  "{path} : pas un clone git intact (modifications locales ?), pas de mise à jour": "{path}: not an intact git clone (local changes?), not updated",
   "git : mise à jour de {path}{ref}": "git: updating {path}{ref}",
   "{n} fichier(s) présent(s) mais non pris en charge : pas de mise à jour (adopt pour les prendre en charge)": "{n} file(s) present but not managed: not updated (adopt to take them over)",
   "Mise à jour : ce que le gestionnaire a installé ou pris en charge est comparé à sa source.": "Update: what the manager installed or took over is compared with its source.",
@@ -280,5 +279,7 @@
   "Mise à jour": "Update",
   "Mettre à jour": "Update",
   "Mettre à jour ({n})": "Update ({n})",
-  "Installe ce qui manque et met à jour ce que le gestionnaire a installé ou pris en charge, s'il a changé à la source (custom nodes, modèles, workflows, paquets pip)": "Installs what is missing and updates what the manager installed or took over, if it changed at the source (custom nodes, models, workflows, pip packages)"
+  "Installe ce qui manque et met à jour ce que le gestionnaire a installé ou pris en charge, s'il a changé à la source (custom nodes, modèles, workflows, paquets pip)": "Installs what is missing and updates what the manager installed or took over, if it changed at the source (custom nodes, models, workflows, pip packages)",
+  "{path} n'est pas un clone git (installé depuis le Comfy Registry ?) : pas de mise à jour, à faire avec le Manager": "{path} is not a git clone (installed from the Comfy Registry?): not updated, use the Manager",
+  "{path} : fichiers modifiés sur place, pas de mise à jour": "{path}: files modified in place, not updated"
 }

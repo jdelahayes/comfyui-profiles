@@ -956,9 +956,11 @@ def plan_custom_node(item, where, paths, manifest, update=False):
         if not managed:
             print(f"   [{name}] " + t("{path} n'a pas été installé par le gestionnaire : pas de mise à jour "
                                 "(adopt pour le prendre en charge)", path=store))
-        elif not (store / ".git").exists() or locally_modified(store):
-            print(f"   [{name}] " + t("{path} : pas un clone git intact (modifications locales ?), "
-                                "pas de mise à jour", path=store))
+        elif not (store / ".git").exists():
+            print(f"   [{name}] " + t("{path} n'est pas un clone git (installé depuis le Comfy Registry ?) : "
+                                "pas de mise à jour, à faire avec le Manager", path=store))
+        elif locally_modified(store):
+            print(f"   [{name}] " + t("{path} : fichiers modifiés sur place, pas de mise à jour", path=store))
         else:
             steps.append(Step(t("git : mise à jour de {path}{ref}", path=store,
                                 ref=f" ({ref})" if ref else ""),

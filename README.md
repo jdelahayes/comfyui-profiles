@@ -169,7 +169,8 @@ source :
 
 - **custom nodes git** : dernier commit de leur branche (celle de `ref`, sinon la branche par
   défaut du dépôt ; un `ref` tag ou commit ne bouge pas). Un node dont des fichiers suivis par
-  git ont été modifiés sur place est laissé tel quel ;
+  git ont été modifiés sur place est laissé tel quel, comme un node sans `.git` (installé par
+  ComfyUI-Manager depuis le Comfy Registry : sa mise à jour se fait avec le Manager) ;
 - **custom nodes Google Drive** : le zip est retéléchargé et ne remplace le node que s'il
   diffère de celui dont il provient (empreinte sha256 notée dans `.comfy-profiles-gdrive`) ;
 - **modèles et workflows** : la source est interrogée sans rien télécharger (ETag Hugging Face,
@@ -311,7 +312,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.6.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.6.1 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
