@@ -8,7 +8,7 @@ Usage:
   comfy_profiles.py [--config FICHIER] list [--json]
   comfy_profiles.py [--config FICHIER] where
   comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
-  comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
+  comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--dry-run]
   comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
   comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
 
@@ -18,6 +18,10 @@ Fichier de profils, le premier trouvé :
   3. <user>/__comfy_profiles/profiles.json : celui qu'écrivent l'édition et l'import du panneau
   4. le modèle, en lecture seule : $COMFY_PROFILES_SEED, sinon examples/profiles.example.json
 Profils synchronisés par défaut : $COMFY_PROFILES (séparés par des virgules).
+`sync --update` met aussi à jour ce que le gestionnaire a installé ou pris en charge (voir
+Manifest), s'il a changé à la source : custom nodes git (dernier commit de leur branche) ou
+Drive (zip différent), modèles et workflows (ETag Hugging Face ou HTTP ; jamais CivitAI, dont
+un fichier ne change pas), paquets pip (--upgrade). Un custom node modifié sur place est laissé.
 `uninstall` supprime les modèles, workflows et custom nodes propres à des profils (avec
 --with-extends : aussi ceux des profils dont ils héritent), sauf ceux dont a encore besoin un
 autre profil installé (voir plan_uninstall) et ceux que le gestionnaire n'a pas installés
@@ -67,6 +71,7 @@ EXAMPLE_CONFIG = HERE / "examples" / "profiles.example.json"
 DATA_DIR_NAME = "__comfy_profiles"
 CONFIG_NAME = "profiles.json"
 MANIFEST_NAME = "installed.json"
+VERSIONS_NAME = "versions.json"
 SECTIONS = ("custom_nodes", "pip", "models", "workflows")
 # "size" : total calculé par profile_sizes.py (informatif, ignoré par sync).
 PROFILE_KEYS = {"description", "size", "extends", *SECTIONS}
@@ -470,6 +475,136 @@ def fetch(item, dest, paths):
         fetch_url(item["url"], dest)
 
 
+# --- Mise à jour (sync --update) ----------------------------------------------------------
+
+class Versions:
+    """Version à la source de chaque modèle ou workflow téléchargé ou vérifié, dans
+    <user>/__comfy_profiles/versions.json. Une entrée ne vaut que tant que le fichier local n'a
+    pas changé (même taille, même date) : elle évite de recalculer l'empreinte d'un gros modèle
+    à chaque `sync --update`."""
+
+    def __init__(self, paths):
+        self.file = paths.data / VERSIONS_NAME
+        try:
+            self.items = json.loads(self.file.read_text())
+        except (OSError, json.JSONDecodeError):
+            self.items = {}
+
+    def get(self, path):
+        entry = self.items.get(str(path))
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        if isinstance(entry, dict) and entry.get("size") == st.st_size and entry.get("mtime") == st.st_mtime_ns:
+            return entry.get("remote")
+        return None
+
+    def set(self, path, remote):
+        st = path.stat()
+        self.items[str(path)] = {"remote": remote, "size": st.st_size, "mtime": st.st_mtime_ns}
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.file.with_name(f".{self.file.name}.tmp")
+        tmp.write_text(json.dumps(self.items, ensure_ascii=False, indent=1) + "\n")
+        tmp.replace(self.file)
+
+
+def remote_version(item):
+    """(version à la source, taille en octets ou None), sans rien télécharger : ETag Hugging
+    Face (sha256 d'un fichier LFS, sha1 de blob git sinon), ou ETag / Last-Modified HTTP.
+    None pour CivitAI : le fichier d'une version de modèle ne change jamais."""
+    if "civitai" in item:
+        return None
+    if "hf" in item:
+        from huggingface_hub import get_hf_file_metadata, hf_hub_url
+
+        meta = get_hf_file_metadata(hf_hub_url(item["hf"], item["file"], revision=item.get("revision")))
+        return meta.etag, meta.size
+    url = github_file_url(item) if "github" in item else item["url"]
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        version = resp.headers.get("ETag") or resp.headers.get("Last-Modified")
+        return version, int(resp.headers.get("Content-Length") or 0) or None
+
+
+def remember_version(item, dest, versions):
+    """Note la version à la source d'un fichier qu'on vient de télécharger (sans échec possible :
+    à défaut, la prochaine vérification comparera le fichier lui-même)."""
+    try:
+        remote = remote_version(item)
+        if remote and remote[0]:
+            versions.set(dest, remote[0])
+    except Exception:
+        pass
+
+
+def file_digest(path, h):
+    with path.open("rb") as f:
+        while chunk := f.read(8 * 1024 * 1024):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def hf_local_etag(path, etag):
+    """Empreinte du fichier local comparable à l'ETag Hugging Face `etag`, ou None."""
+    if len(etag) == 64:
+        return file_digest(path, hashlib.sha256())
+    if len(etag) == 40:
+        return file_digest(path, hashlib.sha1(f"blob {path.stat().st_size}\0".encode()))
+    return None
+
+
+def refresh_file(item, dest, paths, versions):
+    """Retélécharge `dest` s'il a changé à la source. Sans version notée (fichier installé avant
+    cette version du script, ou modifié depuis), on compare le fichier lui-même : empreinte
+    pour Hugging Face, taille sinon (même taille : considéré à jour)."""
+    version, size = remote_version(item)
+    known = versions.get(dest)
+    if version and known == version:
+        changed = False
+    elif size is not None and size != dest.stat().st_size:
+        changed = True
+    elif "hf" in item and version:
+        print("   " + t("calcul de l'empreinte de {name}", name=dest.name), flush=True)
+        changed = hf_local_etag(dest, version) not in (None, version)
+    else:
+        changed = bool(version and known and known != version)
+    if not changed:
+        if version:
+            versions.set(dest, version)
+        print("   " + t("déjà à jour"))
+        return
+    fetch(item, dest, paths)
+    if version:
+        versions.set(dest, version)
+    print("   " + t("mis à jour"))
+
+
+def locally_modified(store):
+    """Vrai si les fichiers suivis par git d'un custom node ont été modifiés sur place."""
+    out = git(store, "status", "--porcelain", "--untracked-files=no", capture_output=True, text=True)
+    return out.returncode != 0 or bool(out.stdout.strip())
+
+
+def update_git(store, ref):
+    """Amène un custom node cloné à la dernière version de `ref` (une branche ; un tag ou un
+    commit ne bougent pas), sinon de la branche par défaut du dépôt."""
+    def head():
+        return git(store, "rev-parse", "--short", "HEAD", capture_output=True, text=True).stdout.strip()
+
+    before = head()
+    if ref:
+        checkout_ref(store, ref)
+    else:
+        shallow = git(store, "rev-parse", "--is-shallow-repository", capture_output=True, text=True)
+        depth = ["--depth", "1"] if shallow.stdout.strip() == "true" else []
+        git(store, "fetch", *depth, "origin", "HEAD", check=True)
+        git(store, "reset", "--hard", "FETCH_HEAD", check=True)
+    after = head()
+    print("   " + (t("déjà à jour ({rev})", rev=after) if after == before
+                   else t("mis à jour : {old} -> {new}", old=before, new=after)))
+
+
 # --- Dépendances Python -------------------------------------------------------------------
 
 def marker(kind, key, content):
@@ -568,11 +703,19 @@ def file_label(item, section, dest):
     return f"{item['type']}/{dest.name}" if section == "models" else f"workflow/{dest.name}"
 
 
-def plan_file(item, dest, kind, paths):
-    if dest.exists():
-        return None
-    return Step(f"{describe_source(item)} -> {dest}", lambda: fetch(item, dest, paths),
-                record=(dest, kind))
+def plan_file(item, dest, kind, paths, versions, update=False, managed=False):
+    """Téléchargement d'un fichier absent ; avec `update`, vérification à la source d'un
+    fichier installé ou pris en charge par le gestionnaire (sauf CivitAI, voir remote_version)."""
+    if not dest.exists():
+        def install():
+            fetch(item, dest, paths)
+            remember_version(item, dest, versions)
+
+        return Step(f"{describe_source(item)} -> {dest}", install, record=(dest, kind))
+    if update and managed and "civitai" not in item:
+        return Step(t("{source} : vérification de {path}", source=describe_source(item), path=dest),
+                    lambda: refresh_file(item, dest, paths, versions))
+    return None
 
 
 def git(store, *args, **kwargs):
@@ -639,8 +782,18 @@ def extract_encrypted_zip(archive, dest, file_id):
                                  id=file_id, error=e)) from None
 
 
-def install_gdrive_zip(file_id, store, paths):
-    """Télécharge un zip public sur Drive et l'extrait dans `store` (remplacé s'il existe)."""
+def gdrive_marker(store):
+    """(id Drive, sha256 du zip ou None) dont provient un custom node, ou (None, None)."""
+    try:
+        fields = (store / GDRIVE_MARKER).read_text().split()
+    except OSError:
+        return None, None
+    return (fields[0] if fields else None), (fields[1] if len(fields) > 1 else None)
+
+
+def install_gdrive_zip(file_id, store, paths, update=False):
+    """Télécharge un zip public sur Drive et l'extrait dans `store` (remplacé s'il existe).
+    `update` : laisse `store` tel quel si le zip est celui dont il provient déjà."""
     paths.staging.mkdir(parents=True, exist_ok=True)
     work = paths.staging / f"gdrive-{file_id}"
     try:
@@ -652,6 +805,10 @@ def install_gdrive_zip(file_id, store, paths):
         if not zipfile.is_zipfile(archive):
             raise RuntimeError(t("le fichier Drive {id} n'est pas un zip (non public, ou quota de "
                                  "téléchargement Drive dépassé ?)", id=file_id))
+        digest = file_digest(archive, hashlib.sha256())
+        if update and gdrive_marker(store) == (file_id, digest):
+            print("   " + t("déjà à jour"))
+            return
         extracted = work / "extracted"
         with zipfile.ZipFile(archive) as zf:
             encrypted = any(info.flag_bits & 0x1 for info in zf.infolist())
@@ -662,10 +819,12 @@ def install_gdrive_zip(file_id, store, paths):
         # Zip d'un dossier : on prend son contenu ; sinon les fichiers sont à la racine du zip.
         entries = [e for e in extracted.iterdir() if e.name != "__MACOSX"]
         root = entries[0] if len(entries) == 1 and entries[0].is_dir() else extracted
-        (root / GDRIVE_MARKER).write_text(file_id)
+        (root / GDRIVE_MARKER).write_text(f"{file_id}\n{digest}\n")
         shutil.rmtree(store, ignore_errors=True)
         store.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(root), str(store))
+        if update:
+            print("   " + t("mis à jour"))
     finally:
         shutil.rmtree(paths.staging, ignore_errors=True)
 
@@ -742,7 +901,7 @@ def foreign_node(name, paths):
     return link.exists() and not link.is_symlink() and link != store
 
 
-def plan_custom_node(item, where, paths, manifest):
+def plan_custom_node(item, where, paths, manifest, update=False):
     url = item.get("git")
     drive = item.get("gdrive")
     if bool(url) == bool(drive):
@@ -780,16 +939,30 @@ def plan_custom_node(item, where, paths, manifest):
     managed = store in manifest
     record = (store, "custom_node")
     if drive:
-        installed = store / GDRIVE_MARKER
+        installed_id = gdrive_marker(store)[0]
         if not store.exists():
             steps.append(Step(t("gdrive:{id} (zip) -> {path}", id=file_id, path=store),
                               lambda: install_gdrive_zip(file_id, store, paths), record))
-        elif not installed.is_file() or not managed:
+        elif not managed or (installed_id is None and not update):
             print(f"   [{name}] " + t("{path} existe mais n'a pas été installé depuis Drive par le gestionnaire, "
                                 "laissé tel quel", path=store))
-        elif installed.read_text().strip() != file_id:
+        elif update:  # remplacé seulement si le zip n'est pas celui dont il provient
+            steps.append(Step(t("gdrive:{id} (zip) : mise à jour de {path}", id=file_id, path=store),
+                              lambda: install_gdrive_zip(file_id, store, paths, update=True), record))
+        elif installed_id != file_id:
             steps.append(Step(t("gdrive:{id} (zip, nouveau fichier) remplace {path}", id=file_id, path=store),
                               lambda: install_gdrive_zip(file_id, store, paths), record))
+    elif update and store.exists():
+        if not managed:
+            print(f"   [{name}] " + t("{path} n'a pas été installé par le gestionnaire : pas de mise à jour "
+                                "(adopt pour le prendre en charge)", path=store))
+        elif not (store / ".git").exists() or locally_modified(store):
+            print(f"   [{name}] " + t("{path} : pas un clone git intact (modifications locales ?), "
+                                "pas de mise à jour", path=store))
+        else:
+            steps.append(Step(t("git : mise à jour de {path}{ref}", path=store,
+                                ref=f" ({ref})" if ref else ""),
+                              lambda: update_git(store, ref)))
     elif not store.exists():
         def clone():
             try:
@@ -857,17 +1030,19 @@ def plan_custom_node(item, where, paths, manifest):
     return name, steps
 
 
-def build_plan(merged, paths, manifest):
+def build_plan(merged, paths, manifest, update=False):
     """Retourne (étapes à exécuter, état de chaque élément : (genre, nom, à installer ?, profil
     qui le déclare, taille déclarée en octets ou None, page de la source ou None : voir
     source_link)). Un élément déclaré par plusieurs profils revient au premier dans l'ordre
     de resolve(), donc au profil hérité plutôt qu'à celui qui en hérite. Valide toute la config
-    avant d'agir."""
+    avant d'agir. `update` (sync --update) : ajoute la mise à jour de ce que le gestionnaire a
+    installé ou pris en charge (voir plan_custom_node, plan_file) et `pip install --upgrade`."""
     steps, status, seen = [], [], set()
+    versions = Versions(paths)
 
     for profile, item in merged["custom_nodes"]:
         where = f"[{profile}] custom_nodes"
-        name, node_steps = plan_custom_node(item, where, paths, manifest)
+        name, node_steps = plan_custom_node(item, where, paths, manifest, update)
         if name in seen:
             continue
         seen.add(name)
@@ -880,27 +1055,34 @@ def build_plan(merged, paths, manifest):
     missing_specs = [s for s in specs if not marker("pip", "spec", s).exists()]
     for spec, profile in specs.items():
         status.append(("pip", spec, spec in missing_specs, profile, None, pip_link(spec)))
-    if missing_specs:
+    to_install = list(specs) if update else missing_specs
+    if to_install:
         def install_specs():
-            pip_install(missing_specs)
-            for s in missing_specs:
+            pip_install((["--upgrade"] if update else []) + to_install)
+            for s in to_install:
                 touch(marker("pip", "spec", s))
 
-        steps.append(Step(f"pip install {' '.join(missing_specs)}", install_specs))
+        steps.append(Step(f"pip install {'--upgrade ' if update else ''}{' '.join(to_install)}", install_specs))
 
+    unmanaged = 0
     for section in ("models", "workflows"):
         for profile, item in merged[section]:
             dest = file_dest(item, f"[{profile}] {section}", section, paths)
             if dest in seen:
                 continue
             seen.add(dest)
-            step = plan_file(item, dest, section[:-1], paths)
+            managed = dest in manifest
+            unmanaged += update and dest.exists() and not managed
+            step = plan_file(item, dest, section[:-1], paths, versions, update, managed)
             size = item.get("size") if isinstance(item, dict) else None
             size = size if isinstance(size, int) and not isinstance(size, bool) else None
-            status.append((section[:-1], file_label(item, section, dest), bool(step), profile, size,
+            status.append((section[:-1], file_label(item, section, dest), not dest.exists(), profile, size,
                            source_link(item)))
             if step:
                 steps.append(step)
+    if unmanaged:
+        print("   " + t("{n} fichier(s) présent(s) mais non pris en charge : pas de mise à jour "
+                        "(adopt pour les prendre en charge)", n=unmanaged))
 
     return steps, status
 
@@ -1109,8 +1291,11 @@ def cmd_sync(profiles, args):
         return 0
     paths = Paths()
     manifest = Manifest(paths, profiles)
+    if args.update:
+        print(">> " + t("Mise à jour : ce que le gestionnaire a installé ou pris en charge est "
+                        "comparé à sa source."))
     try:
-        steps, _ = build_plan(resolve(profiles, names), paths, manifest)
+        steps, _ = build_plan(resolve(profiles, names), paths, manifest, args.update)
     except ConfigError as e:
         sys.exit(f"!! {e}")
 
@@ -1420,6 +1605,9 @@ def main():
     sync = sub.add_parser("sync", help=t("installe ce qui manque pour des profils"))
     sync.add_argument("profiles", nargs="?", help=t("défaut : $COMFY_PROFILES"))
     sync.add_argument("--dry-run", action="store_true", help=t("affiche les actions sans rien faire"))
+    sync.add_argument("--update", action="store_true",
+                      help=t("met aussi à jour ce que le gestionnaire a installé ou pris en charge, "
+                             "s'il a changé à la source"))
     adopt = sub.add_parser("adopt", help=t("prend en charge ce qui est déjà présent pour des profils "
                                            "(uninstall pourra le supprimer)"))
     adopt.add_argument("profiles")

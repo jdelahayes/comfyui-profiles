@@ -269,9 +269,9 @@ class ProfilesPanel {
       this.setLine(detail.index, detail.text);
       return;
     }
-    const { action, dry_run: dryRun, returncode } = detail;
-    this.sync = { ...this.sync, running: false, stopping: false, action, dry_run: dryRun, returncode };
-    const what = dryRun && action === "sync" ? "Dry-run" : actionLabel(action);
+    const { action, dry_run: dryRun, force, returncode } = detail;
+    this.sync = { ...this.sync, running: false, stopping: false, action, dry_run: dryRun, force, returncode };
+    const what = dryRun && action === "sync" ? "Dry-run" : actionLabel(action, force);
     if (returncode === 0) toast("success", t("Profils"), t("{action} : terminé.", { action: what }));
     else if (returncode === 130) toast("warn", t("Profils"), t("{action} : arrêté.", { action: what }));
     else toast("error", t("Profils"), t("{action} : incomplet, voir les logs.", { action: what }));
@@ -297,7 +297,8 @@ class ProfilesPanel {
     if (this.expanded.has(name)) this.render();
   }
 
-  // force (action « sizes ») : réinterroge aussi les fichiers dont la taille est connue.
+  // force : pour « sizes », réinterroge aussi les fichiers dont la taille est connue ; pour
+  // « sync », met aussi à jour ce qui a changé à la source.
   async startSync(dryRun, action = "sync", profiles = [...this.selected], withExtends = false, force = false) {
     try {
       this.setSync(await request("POST", "/sync",
@@ -619,7 +620,7 @@ class ProfilesPanel {
     });
 
     const selection = [...this.selected];
-    const what = actionLabel(this.sync.action);
+    const what = actionLabel(this.sync.action, this.sync.force);
     const target = (this.sync.profiles || []).join(", ");
     const last = what.toLowerCase();
     const status = running
@@ -688,6 +689,11 @@ class ProfilesPanel {
                        onclick: () => this.startSync(false) },
           selection.length ? t("Synchroniser ({n})", { n: selection.length }) : t("Synchroniser")),
         el("button", { disabled: running || !selection.length, onclick: () => this.startSync(true) }, "Dry-run"),
+        el("button", {
+          disabled: locked || !selection.length, onclick: () => this.startSync(false, "sync", selection, false, true),
+          title: t("Installe ce qui manque et met à jour ce que le gestionnaire a installé ou pris en charge, " +
+                   "s'il a changé à la source (custom nodes, modèles, workflows, paquets pip)"),
+        }, selection.length ? t("Mettre à jour ({n})", { n: selection.length }) : t("Mettre à jour")),
         el("button", { disabled: locked || !selection.length, onclick: () => this.prepareUninstall() },
           t("Désinstaller…")),
         running && el("button", { class: "danger", disabled: this.sync.stopping, onclick: () => this.stop() },
@@ -898,7 +904,9 @@ function saveSetting(key, value) {
   try { localStorage.setItem(key, value); } catch { /* réglage simplement non mémorisé */ }
 }
 
-function actionLabel(action) {
+// force (action « sync ») : mise à jour de ce qui a changé à la source (sync --update).
+function actionLabel(action, force = false) {
+  if (action === "sync" && force) return t("Mise à jour");
   return t({ uninstall: "Désinstallation", sizes: "Calcul des tailles" }[action] || "Synchronisation");
 }
 

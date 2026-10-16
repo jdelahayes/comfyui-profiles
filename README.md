@@ -132,7 +132,8 @@ ignorées et peuvent servir de commentaires.)
 
 ## Ce qui est installé, ce qui est supprimé
 
-`sync` installe ce qui manque et ne touche jamais à ce qui est déjà présent. Ce que le
+`sync` installe ce qui manque et ne touche jamais à ce qui est déjà présent (sauf
+`--update`, voir [Mise à jour](#mise-à-jour)). Ce que le
 gestionnaire installe lui-même est noté dans `user/__comfy_profiles/installed.json`, et
 `uninstall` ne supprime **que** ces éléments : un modèle copié à la main, un custom node déjà
 là (installé avec le Manager, livré avec une image Docker...) n'est jamais supprimé, ni changé
@@ -159,6 +160,30 @@ est présent pour le profil, `extends` compris. Les dépendances de ses custom n
 considérées comme déjà installées (le node fonctionnait déjà) : `sync` ne les relance pas. Le panneau signale ce qui n'est pas encore pris
 en charge : pastille orange « N non pris en charge » sur le profil, et mention sur chaque
 élément dans son détail.
+
+### Mise à jour
+
+`sync --update` (bouton **Mettre à jour** du panneau) installe ce qui manque, comme `sync`, et
+met aussi à jour ce que le gestionnaire a installé ou pris en charge, s'il a changé à la
+source :
+
+- **custom nodes git** : dernier commit de leur branche (celle de `ref`, sinon la branche par
+  défaut du dépôt ; un `ref` tag ou commit ne bouge pas). Un node dont des fichiers suivis par
+  git ont été modifiés sur place est laissé tel quel ;
+- **custom nodes Google Drive** : le zip est retéléchargé et ne remplace le node que s'il
+  diffère de celui dont il provient (empreinte sha256 notée dans `.comfy-profiles-gdrive`) ;
+- **modèles et workflows** : la source est interrogée sans rien télécharger (ETag Hugging Face,
+  ou ETag / `Last-Modified` HTTP pour GitHub et les URL), et le fichier n'est retéléchargé que
+  s'il a changé. La version de chaque fichier est notée dans
+  `user/__comfy_profiles/versions.json`. Pour un fichier sans version notée (installé avant
+  cette fonction), un fichier Hugging Face est comparé à son empreinte (calculée une fois), un
+  autre à sa taille. CivitAI n'est jamais vérifié : le fichier d'une version de modèle ne
+  change pas ;
+- **paquets pip** : `pip install --upgrade`.
+
+Les dépendances d'un custom node mis à jour sont réinstallées si son `requirements.txt` ou son
+`install.py` a changé. Ce que le gestionnaire n'a pas installé n'est jamais mis à jour : le
+prendre en charge d'abord (`adopt`). Après la mise à jour de custom nodes, redémarrer ComfyUI.
 
 Mise à jour depuis une version sans manifeste : si les custom nodes sont rangés à part
 (`COMFY_PROFILES_NODES_STORE`), ce qui est déjà présent pour les profils du fichier est repris
@@ -222,7 +247,8 @@ rester telles quelles. Un message absent reste en français.
   profil lui-même, puis chaque profil hérité), avec la taille de chaque fichier (`?` tant
   qu'elle n'est pas connue : « Recalculer les tailles » l'interroge à la source) et une
   icône qui ouvre sa source (Hugging Face, GitHub, CivitAI, Google Drive, PyPI ou l'URL).
-- Synchronisation, dry-run ou désinstallation des profils cochés, avec les logs en direct.
+- Synchronisation, dry-run, mise à jour (voir [Mise à jour](#mise-à-jour)) ou désinstallation
+  des profils cochés, avec les logs en direct.
   Une seule action à la fois ; **Arrêter** l'interrompt proprement (le téléchargement ou le
   clone en cours est abandonné sans laisser de fichier incomplet).
 - Section **Ce workflow**, pour un workflow qui déclare ses profils : voir
@@ -244,7 +270,7 @@ la consultation et au dry-run.
 comfy_profiles.py [--config FICHIER] list [--json]
 comfy_profiles.py [--config FICHIER] where                    # fichier utilisé et son origine (JSON)
 comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
-comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--dry-run]
+comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--dry-run]
 comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
 comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
 profile_sizes.py [--config FICHIER] [--env FICHIER] [--force] [--dry-run]
@@ -285,7 +311,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.5.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.6.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json

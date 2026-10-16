@@ -195,6 +195,7 @@ class Job:
         self.stopping = False
         self.profiles = []
         self.dry_run = False
+        self.force = False
         self.returncode = None
         self.lines = {}  # index -> texte ; une barre de progression réécrit son index
         self.next_index = 0
@@ -210,6 +211,7 @@ class Job:
             "stopping": self.stopping,
             "profiles": self.profiles,
             "dry_run": self.dry_run,
+            "force": self.force,
             "returncode": self.returncode,
             "lines": sorted(self.lines.items()),
         }
@@ -221,7 +223,7 @@ class Job:
         PromptServer.instance.send_sync(EVENT, {"index": index, "text": text})
 
     async def start(self, action, profiles, dry_run, with_extends=False, lang=None, force=False):
-        self.action, self.profiles, self.dry_run = action, profiles, dry_run
+        self.action, self.profiles, self.dry_run, self.force = action, profiles, dry_run, force
         self.returncode, self.lines, self.stopping = None, {}, False
         if action == "sizes":  # tous les profils, écrit les tailles dans le fichier de profils
             # force : réinterroge aussi les fichiers dont la taille est déjà connue.
@@ -230,6 +232,8 @@ class Job:
             cmd = [SCRIPT, action, ",".join(profiles)] + (["--dry-run"] if dry_run else [])
             if action == "uninstall" and with_extends:
                 cmd.append("--with-extends")
+            if action == "sync" and force:  # met aussi à jour ce qui a changé à la source
+                cmd.append("--update")
         self.proc = await asyncio.create_subprocess_exec(
             sys.executable, *map(str, cmd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -281,7 +285,8 @@ class Job:
             self.next_index += 1
         self.returncode = await self.proc.wait()
         PromptServer.instance.send_sync(EVENT, {"done": True, "returncode": self.returncode,
-                                                "action": self.action, "dry_run": self.dry_run})
+                                                "action": self.action, "dry_run": self.dry_run,
+                                                "force": self.force})
 
 
 job = Job()
