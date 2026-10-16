@@ -3,8 +3,9 @@ qui est déjà installé, lance (ou arrête) une synchronisation, une désinstal
 des tailles avec ses logs en direct, édite, importe ou exporte le fichier de profils et
 redémarre ComfyUI.
 
-Aucun node dans le graphe : ce module ne fait qu'ajouter des routes HTTP au serveur ComfyUI et
-un onglet dans la barre latérale (web/profiles.js). Tout le travail est délégué à
+Ce module ajoute des routes HTTP au serveur ComfyUI, un onglet dans la barre latérale
+(web/profiles.js) et un seul node, « Workflow profiles » (profiles_node.py), jamais exécuté, qui
+déclare dans un workflow les profils dont il a besoin. Tout le travail est délégué à
 comfy_profiles.py (à côté de ce fichier, utilisable aussi en ligne de commande), lancé en
 sous-processus avec le Python de ComfyUI : les paquets pip
 s'installent ainsi dans le bon venv, et une erreur du script (sys.exit, pip...) ne peut pas
@@ -35,8 +36,9 @@ from aiohttp import web
 from server import PromptServer
 
 from . import profiles_i18n as i18n
+from .profiles_merge import MergeError, merge
+from .profiles_node import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
-NODE_CLASS_MAPPINGS = {}  # sans ça, ComfyUI ignore le module (et donc WEB_DIRECTORY)
 WEB_DIRECTORY = "./web"
 
 SCRIPT = Path(os.environ.get("COMFY_PROFILES_SCRIPT") or Path(__file__).parent / "comfy_profiles.py")
@@ -372,26 +374,54 @@ async def put_config(request):
     return await save_config(body.get("text", ""), body.get("origin") or t("édition dans le panneau"), request)
 
 
-@routes.post(f"{API}/config/import-url")
-@writes
-async def import_config_url(request):
+async def fetch_config(url, request):
+    """Texte d'un fichier de profils publié à `url` (ex. lien raw GitHub ou gist)."""
     _ = tr(request)
-    url = str((await request.json()).get("url") or "").strip()
     if not url.startswith(("https://", "http://")):
-        return json_error(400, _("URL http(s) attendue"))
+        raise bad_request(_("URL http(s) attendue"))
     try:
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, headers={"User-Agent": "comfyui-profiles"}) as resp:
                 if resp.status != 200:
-                    return json_error(400, f"{url} : HTTP {resp.status}")
+                    raise bad_request(f"{url} : HTTP {resp.status}")
                 body = await resp.content.read(MAX_CONFIG_BYTES + 1)
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        return json_error(400, f"{url} : {e or type(e).__name__}")
+        raise bad_request(f"{url} : {e or type(e).__name__}")
     if len(body) > MAX_CONFIG_BYTES:
-        return json_error(400, _("{url} : fichier trop gros (plus de {size})", url=url,
-                                 size=i18n.human_size(MAX_CONFIG_BYTES, _)))
-    return await save_config(body.decode("utf-8", errors="replace"), t("import de {url}", url=url), request)
+        raise bad_request(_("{url} : fichier trop gros (plus de {size})", url=url,
+                            size=i18n.human_size(MAX_CONFIG_BYTES, _)))
+    return body.decode("utf-8", errors="replace")
+
+
+@routes.post(f"{API}/config/import-url")
+@writes
+async def import_config_url(request):
+    url = str((await request.json()).get("url") or "").strip()
+    text = await fetch_config(url, request)
+    return await save_config(text, t("import de {url}", url=url), request)
+
+
+@routes.post(f"{API}/config/add-from-url")
+@writes
+async def add_profiles_from_url(request):
+    """Ajoute au fichier de profils des profils (et ceux dont ils héritent) pris dans celui
+    publié à une URL, sans rien remplacer : la source déclarée par le node « Workflow
+    profiles » d'un workflow. Voir profiles_merge.py."""
+    body = await request.json()
+    url = str(body.get("url") or "").strip()
+    names = profile_names(body.get("profiles"), request)
+    source = await fetch_config(url, request)
+    path, _, _ = await config_info(request)
+    try:
+        text, result = merge(path.read_text(), source, names, tr(request))
+    except MergeError as e:
+        return json_error(400, str(e))
+    if result["added"]:
+        response = await save_config(text, t("profils ajoutés depuis {url}", url=url), request)
+        if response.status != 200:
+            return response
+    return web.json_response(result)
 
 
 @routes.delete(f"{API}/config")

@@ -15,8 +15,9 @@ cd ComfyUI/custom_nodes
 git clone https://github.com/jdelahayes/comfyui-profiles.git
 ```
 
-puis redémarrer ComfyUI. L'onglet **Profils** apparaît dans la barre latérale. Aucun node n'est
-ajouté au graphe.
+puis redémarrer ComfyUI. L'onglet **Profils** apparaît dans la barre latérale, et le node
+**Profils du workflow** dans la catégorie *utils* (voir
+[Profils d'un workflow](#profils-dun-workflow)).
 
 ## Contenu
 
@@ -26,8 +27,11 @@ ajouté au graphe.
 - `__init__.py` : routes HTTP `/comfy-profiles/*` ajoutées au serveur ComfyUI ; elles lancent
   `comfy_profiles.py` et `profile_sizes.py` en sous-processus, avec le Python de ComfyUI et
   ses chemins.
+- `profiles_node.py` : le node *Profils du workflow*.
+- `profiles_merge.py` : ajout au fichier de profils de profils pris dans un autre fichier.
 - `web/profiles.js` : l'onglet de la barre latérale.
-- `profiles_i18n.py` et `lang/` : traductions (voir [Langue](#langue)).
+- `profiles_i18n.py` et `lang/` : traductions (voir [Langue](#langue)) ; `locales/` :
+  traduction du node, chargée par ComfyUI.
 - `examples/profiles.example.json` : petit fichier de profils, utilisé tant qu'aucun autre
   n'est fourni.
 - `profiles.schema.json` : schéma JSON du fichier de profils (validation et autocomplétion
@@ -160,6 +164,30 @@ Mise à jour depuis une version sans manifeste : si les custom nodes sont rangé
 (`COMFY_PROFILES_NODES_STORE`), ce qui est déjà présent pour les profils du fichier est repris
 dans le manifeste à la première utilisation (ce stockage n'est rempli que par le gestionnaire).
 
+## Profils d'un workflow
+
+Le node **Profils du workflow** (*Workflow profiles*, catégorie *utils*) déclare dans un
+workflow les profils dont il a besoin. L'information voyage avec le workflow : qui le reçoit
+sait quoi installer.
+
+- **profils** : noms des profils, séparés par des virgules (`krea2, essential-nodes`).
+- **source** (optionnel) : URL du fichier de profils qui les définit, par exemple un lien raw
+  GitHub. Un nom de profil n'a de sens que dans un fichier de profils donné : sans source, la
+  déclaration ne sert qu'à ceux qui ont déjà ces profils.
+
+Le node n'a ni entrée reliable ni sortie : ComfyUI ne l'exécute jamais, il ne change rien au
+résultat du workflow. Dans un ComfyUI sans ce plugin, il apparaît comme node manquant, ce qui
+signale qu'il faut installer comfyui-profiles.
+
+À l'ouverture d'un workflow qui contient ce node (sous-graphes compris), une notification
+signale les profils déclarés qui ne sont pas installés ou pas dans le fichier de profils. Le
+panneau affiche alors en tête une section **Ce workflow** : l'état de chaque profil déclaré,
+un bouton pour installer ce qui manque (un profil, ou tous ceux du workflow), et, pour un
+profil absent du fichier de profils, un bouton qui l'**ajoute depuis la source** du node. Cet
+ajout reprend le profil et ceux dont il hérite, sans remplacer le fichier : les profils déjà
+présents restent tels quels (signalés s'ils diffèrent de la source), et le reste du fichier
+garde sa mise en forme.
+
 ## Langue
 
 Le panneau, les messages du script et les erreurs du serveur sont en français ou en anglais.
@@ -197,6 +225,8 @@ rester telles quelles. Un message absent reste en français.
 - Synchronisation, dry-run ou désinstallation des profils cochés, avec les logs en direct.
   Une seule action à la fois ; **Arrêter** l'interrompt proprement (le téléchargement ou le
   clone en cours est abandonné sans laisser de fichier incomplet).
+- Section **Ce workflow**, pour un workflow qui déclare ses profils : voir
+  [Profils d'un workflow](#profils-dun-workflow).
 - Fichier de profils : édition, import (fichier ou URL), export, retour au modèle.
 - **Recalculer les tailles** : lance `profile_sizes.py` sur le fichier de profils (seuls les
   fichiers sans taille sont interrogés) ; **Tout recalculer** réinterroge aussi ceux dont la
@@ -255,7 +285,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.4.1 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.5.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json

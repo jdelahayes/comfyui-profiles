@@ -1,0 +1,16 @@
+{
+  "WorkflowProfiles": {
+    "display_name": "Profils du workflow",
+    "description": "Profils dont ce workflow a besoin (comfyui-profiles). Jamais exécuté : il ne fait que porter cette information avec le workflow.",
+    "inputs": {
+      "profiles": {
+        "name": "profils",
+        "tooltip": "Noms des profils, séparés par des virgules (ex. krea2, essential-nodes)."
+      },
+      "source": {
+        "name": "source",
+        "tooltip": "URL du fichier de profils qui les définit (ex. lien raw GitHub), pour qui n'a pas ces profils."
+      }
+    }
+  }
+}

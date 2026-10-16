@@ -94,6 +94,12 @@ const STYLE = `
 .cprof .log { background: var(--comfy-input-bg); border: 1px solid var(--border-color);
   border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px; white-space: pre-wrap;
   word-break: break-all; max-height: 320px; min-height: 80px; overflow-y: auto; }
+.cprof .workflow { border: 1px solid var(--border-color); border-left: 3px solid #3a7abf;
+  border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.cprof .workflow.done { border-left-color: #3a9a5a; }
+.cprof .need { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.cprof .need .name { flex: 1; min-width: 0; font-family: monospace; word-break: break-all; cursor: pointer; }
+.cprof .need .name:hover { text-decoration: underline; }
 .cprof textarea { width: 100%; min-height: 400px; box-sizing: border-box; resize: vertical;
   font-family: monospace; font-size: 12px; background: var(--comfy-input-bg);
   color: var(--input-text, var(--fg-color)); border: 1px solid var(--border-color); border-radius: 4px; }
@@ -122,8 +128,71 @@ async function request(method, path, body) {
   return data;
 }
 
-function toast(severity, summary, detail) {
-  app.extensionManager?.toast?.add({ severity, summary, detail, life: 5000 });
+function toast(severity, summary, detail, life = 5000) {
+  app.extensionManager?.toast?.add({ severity, summary, detail, life });
+}
+
+// --- Profils déclarés par le workflow ouvert ------------------------------------------------
+
+// Node « Workflow profiles » (profiles_node.py) : profils dont le workflow a besoin, et URL du
+// fichier de profils qui les définit.
+const WORKFLOW_NODE = "WorkflowProfiles";
+const PROFILE_NAME = /^[\w.-]+$/;
+// États où le profil n'a rien à installer pour le workflow (voir STATES).
+const SATISFIED = new Set(["installed", "empty"]);
+
+// [{name, source, valid}] des nodes « Workflow profiles » du workflow ouvert, sous-graphes
+// compris ; pour un profil déclaré plusieurs fois, la première source non vide.
+function workflowNeeds() {
+  const graph = app.rootGraph ?? app.graph;
+  if (!graph) return [];
+  const subgraphs = [...(graph.subgraphs?.values?.() ?? [])];
+  const needs = new Map();
+  for (const node of [graph, ...subgraphs].flatMap((g) => g.nodes ?? [])) {
+    if (node.type !== WORKFLOW_NODE) continue;
+    const value = (name) => String(node.widgets?.find((w) => w.name === name)?.value ?? "").trim();
+    const source = value("source");
+    for (const name of value("profiles").split(",").map((n) => n.trim()).filter(Boolean)) {
+      if (!needs.get(name)) needs.set(name, source);
+    }
+  }
+  return [...needs].map(([name, source]) => ({ name, source, valid: PROFILE_NAME.test(name) }));
+}
+
+// Profil déclaré : sa ligne de `list --json`, ou null s'il n'est pas dans le fichier de profils.
+function declared(profiles, need) {
+  return need.valid && Object.hasOwn(profiles, need.name) ? profiles[need.name] : null;
+}
+
+// Dernière alerte affichée, pour ne pas la répéter à chaque rechargement du même graphe
+// (annuler / rétablir, retour sur un onglet).
+let lastAlert = "";
+
+// À l'ouverture d'un workflow : alerte si des profils qu'il déclare manquent.
+async function checkWorkflow() {
+  const needs = workflowNeeds();
+  panel?.render();
+  if (!needs.length) return;
+  let profiles;
+  try {
+    profiles = panel?.data?.profiles ?? (await request("GET", "/profiles")).profiles;
+  } catch (e) {
+    console.warn("[comfy-profiles]", e);
+    return;
+  }
+  const missing = needs.flatMap((need) => {
+    const p = declared(profiles, need);
+    if (p && SATISFIED.has(p.state)) return [];
+    const state = !need.valid ? t("nom invalide")
+      : p ? t(STATES[p.state]?.label ?? STATES.missing.label) : t("absent du fichier de profils");
+    return [`${need.name} (${state.toLowerCase()})`];
+  });
+  const key = missing.join(", ");
+  if (key && key !== lastAlert) {
+    toast("warn", t("Profils"),
+      t("Ce workflow a besoin de profils : {names}. Voir le panneau Profils.", { names: key }), 10000);
+  }
+  lastAlert = key;
 }
 
 class ProfilesPanel {
@@ -563,6 +632,7 @@ class ProfilesPanel {
 
     return el("div", { style: "display:flex;flex-direction:column;gap:10px" },
       header,
+      this.renderWorkflow(locked),
       el("div", { class: "bar" },
         el("button", { onclick: () => this.load() }, t("Recharger")),
         el("button", {
@@ -627,6 +697,72 @@ class ProfilesPanel {
       status && el("div", { class: this.sync.returncode ? "error" : "muted" }, status),
       this.logBox,
     );
+  }
+
+  // Profils déclarés par le workflow ouvert (node « Workflow profiles ») : état, installation,
+  // ajout depuis la source déclarée de ceux qui manquent au fichier de profils.
+  renderWorkflow(locked) {
+    const needs = workflowNeeds();
+    if (!needs.length) return null;
+    const profiles = this.data.profiles;
+    const toInstall = needs.filter((n) => {
+      const p = declared(profiles, n);
+      return p && !SATISFIED.has(p.state) && STATES[p.state]?.install;
+    }).map((n) => n.name);
+    const done = needs.every((n) => SATISFIED.has(declared(profiles, n)?.state));
+    const rows = needs.map((need) => {
+      const p = declared(profiles, need);
+      const state = p && (STATES[p.state] || STATES.missing);
+      const status = !need.valid ? el("span", { class: "error" }, t("nom invalide"))
+        : !p ? el("span", { class: "warn" }, t("absent du fichier de profils"))
+        : el("span", { class: SATISFIED.has(p.state) ? "ok" : "todo" }, t(state.label));
+      return el("div", { class: "need" },
+        el("span", { class: SATISFIED.has(p?.state) ? "ok" : "todo" }, SATISFIED.has(p?.state) ? "✓" : "✗"),
+        el("span", {
+          class: "name", title: t("Afficher ce profil dans la liste"),
+          onclick: () => { this.search.value = need.name; this.render(); },
+        }, need.name),
+        status,
+        el("div", { class: "actions" },
+          p && state.install && !SATISFIED.has(p.state) && iconButton("pi-download",
+            t("Installer {name} (ce qui manque)", { name: need.name }), locked,
+            () => this.startSync(false, "sync", [need.name])),
+          !p && need.valid && need.source && iconButton("pi-plus",
+            t("Ajouter {name} depuis {url}", { name: need.name, url: need.source }), locked,
+            () => this.addFromSource(need.source, [need.name])),
+          !p && need.valid && !need.source && el("span", {
+            class: "muted", title: t("Le node ne donne pas de source : importe le fichier de profils qui le définit."),
+          }, t("sans source"))));
+    });
+    return el("div", { class: `workflow${done ? " done" : ""}` },
+      el("div", { class: "bar" },
+        el("strong", {}, t("Ce workflow")),
+        el("span", { class: "muted" }, t("profils déclarés par son node « Profils du workflow »"))),
+      rows,
+      done ? el("div", { class: "ok" }, t("Tous les profils de ce workflow sont installés."))
+        : toInstall.length > 1 && el("div", { class: "bar" },
+          el("button", { class: "primary", disabled: locked, onclick: () => this.startSync(false, "sync", toInstall) },
+            t("Installer les profils du workflow ({n})", { n: toInstall.length }))));
+  }
+
+  // Ajoute au fichier de profils des profils (et ceux dont ils héritent) pris dans le fichier
+  // publié à `url`, sans remplacer ceux qui y sont déjà.
+  async addFromSource(url, names) {
+    if (!confirm(t("Ajouter {names} (et les profils dont ils héritent) à ton fichier de profils, " +
+                   "depuis {url} ? Les profils déjà présents ne sont pas modifiés.",
+                   { names: names.join(", "), url }))) return;
+    try {
+      const { added, conflicts } = await request("POST", "/config/add-from-url", { url, profiles: names });
+      toast("success", t("Profils"), added.length ? t("Profils ajoutés : {names}", { names: added.join(", ") })
+        : t("Rien à ajouter : ces profils sont déjà dans ton fichier."));
+      if (conflicts.length) {
+        toast("warn", t("Profils"), t("Déjà dans ton fichier avec un autre contenu, gardés tels quels : {names}",
+          { names: conflicts.join(", ") }), 10000);
+      }
+    } catch (e) {
+      toast("error", t("Profils"), e.message);
+    }
+    await this.load();
   }
 
   // `data` : résultat de `list --json`, ou null si le fichier de profils est illisible.
@@ -791,15 +927,24 @@ function iconButton(icon, hint, disabled, onclick) {
 }
 
 let panel = null;
+// Traductions : chargées dès init, car le dernier workflow est rouvert avant setup.
+let messagesLoaded = null;
 
 app.registerExtension({
   name: "comfyui-profiles.panel",
+  init() {
+    messagesLoaded = loadMessages();
+  },
+  async afterConfigureGraph() {
+    await messagesLoaded;
+    await checkWorkflow();
+  },
   async setup() {
     if (!app.extensionManager?.registerSidebarTab) {
       console.warn("[comfy-profiles] registerSidebarTab indisponible dans ce frontend");
       return;
     }
-    await loadMessages();
+    await messagesLoaded;
     document.head.append(el("style", {}, STYLE));
     app.extensionManager.registerSidebarTab({
       id: "comfy-profiles",
@@ -810,9 +955,10 @@ app.registerExtension({
       render: (container) => {
         if (!panel) {
           panel = new ProfilesPanel();
-          panel.render();
           panel.load();
         }
+        // Le workflow ouvert a pu changer depuis le dernier affichage.
+        panel.render();
         container.replaceChildren(panel.root);
       },
     });
