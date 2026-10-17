@@ -15,5 +15,5 @@ Repository = "https://github.com/jdelahayes/comfyui-profiles"
 # the registry.
 [tool.comfy]
 PublisherId = "jdelahayes"
-DisplayName = "Profiles"
+DisplayName = "comfyui-profiles"
 Icon = ""
