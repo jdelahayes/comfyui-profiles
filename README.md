@@ -1,11 +1,11 @@
 # comfyui-profiles
 
-Panneau **Profils** pour ComfyUI : installe, vérifie et désinstalle des *profils d'utilisation*
-depuis la barre latérale. Un profil décrit tout ce dont un usage a besoin (modèles, custom
-nodes, workflows, paquets pip) dans un fichier `profiles.json`.
+**Profiles** panel for ComfyUI: install, check and uninstall *usage profiles* from the sidebar.
+A profile describes everything a use case needs (models, custom nodes, workflows, pip
+packages) in a `profiles.json` file.
 
-Fonctionne avec n'importe quel ComfyUI (installation manuelle, comfy-cli, image Docker). Pour
-un exemple d'intégration dans une image Docker, voir
+Works with any ComfyUI (manual install, comfy-cli, Docker image). For an example of
+integration in a Docker image, see
 [runpod-comfy-blackwell](https://github.com/jdelahayes/runpod-comfy-blackwell).
 
 ## Installation
@@ -15,50 +15,48 @@ cd ComfyUI/custom_nodes
 git clone https://github.com/jdelahayes/comfyui-profiles.git
 ```
 
-puis redémarrer ComfyUI. L'onglet **Profils** apparaît dans la barre latérale, et le node
-**Profils du workflow** dans la catégorie *utils* (voir
-[Profils d'un workflow](#profils-dun-workflow)).
+then restart ComfyUI. The **Profiles** tab shows up in the sidebar, and the **Workflow
+profiles** node in the *utils* category (see [Workflow profiles](#workflow-profiles)).
 
-## Contenu
+## Contents
 
-- `comfy_profiles.py` : le gestionnaire de profils, utilisable seul en ligne de commande.
-- `profile_sizes.py` : calcule la taille de chaque profil à la source (Hugging Face, CivitAI,
-  GitHub, URL), sans rien télécharger, et l'enregistre dans le fichier de profils.
-- `__init__.py` : routes HTTP `/comfy-profiles/*` ajoutées au serveur ComfyUI ; elles lancent
-  `comfy_profiles.py` et `profile_sizes.py` en sous-processus, avec le Python de ComfyUI et
-  ses chemins.
-- `profiles_node.py` : le node *Profils du workflow*.
-- `profiles_merge.py` : ajout au fichier de profils de profils pris dans un autre fichier.
-- `web/profiles.js` : l'onglet de la barre latérale.
-- `profiles_i18n.py` et `lang/` : traductions (voir [Langue](#langue)) ; `locales/` :
-  traduction du node, chargée par ComfyUI.
-- `examples/profiles.example.json` : petit fichier de profils, utilisé tant qu'aucun autre
-  n'est fourni.
-- `profiles.schema.json` : schéma JSON du fichier de profils (validation et autocomplétion
-  dans un éditeur, via `"$schema"`).
+- `comfy_profiles.py`: the profile manager, usable on its own from the command line.
+- `profile_sizes.py`: computes the size of each profile at the source (Hugging Face, CivitAI,
+  GitHub, URL), without downloading anything, and saves it in the profiles file.
+- `__init__.py`: `/comfy-profiles/*` HTTP routes added to the ComfyUI server; they run
+  `comfy_profiles.py` and `profile_sizes.py` as subprocesses, with ComfyUI's Python and paths.
+- `profiles_node.py`: the *Workflow profiles* node.
+- `profiles_merge.py`: adds to the profiles file some profiles taken from another file.
+- `web/profiles.js`: the sidebar tab.
+- `profiles_i18n.py` and `lang/`: translations (see [Language](#language)); `locales/`:
+  translation of the node, loaded by ComfyUI.
+- `examples/profiles.example.json`: small profiles file, used as long as no other one is
+  provided.
+- `profiles.schema.json`: JSON schema of the profiles file (validation and completion in an
+  editor, through `"$schema"`).
 
-## Fichier de profils
+## Profiles file
 
-Le fichier utilisé est le premier trouvé parmi :
+The file used is the first one found among:
 
-1. `--config FICHIER` (ligne de commande) ;
-2. `COMFY_PROFILES_CONFIG` : s'il n'existe pas encore, le modèle y est d'abord copié ;
-3. `ComfyUI/user/__comfy_profiles/profiles.json` : **ton fichier**, celui qu'écrivent
-   l'édition, l'import et le calcul des tailles du panneau ;
-4. le **modèle**, en lecture seule : `COMFY_PROFILES_SEED` (fourni par exemple par une image
-   Docker), sinon `examples/profiles.example.json`.
+1. `--config FILE` (command line);
+2. `COMFY_PROFILES_CONFIG`: if it does not exist yet, the template is copied there first;
+3. `ComfyUI/user/__comfy_profiles/profiles.json`: **your file**, the one written by the
+   panel's editing, import and size computation;
+4. the **template**, read-only: `COMFY_PROFILES_SEED` (provided for instance by a Docker
+   image), otherwise `examples/profiles.example.json`.
 
-Tant que tu n'as rien modifié, c'est donc le modèle qui sert, et ses mises à jour sont prises
-en compte. La première modification crée ton fichier, qui prend le relais. **Revenir au
-modèle** le met de côté (`profiles.json.bak`).
+As long as you have not changed anything, the template is used, and its updates are taken
+into account. The first change creates your file, which takes over. **Back to template** sets
+it aside (`profiles.json.bak`).
 
-`user/__comfy_profiles/` est un dossier « System User » de ComfyUI (préfixe `__`) : ComfyUI ne
-le sert jamais par ses routes HTTP (`/api/userdata`...), seul ce panneau y lit et écrit, après
+`user/__comfy_profiles/` is a ComfyUI "System User" folder (`__` prefix): ComfyUI never serves
+it through its HTTP routes (`/api/userdata`...), only this panel reads and writes there, after
 validation.
 
-Depuis le panneau : **Éditer**, **Importer…** (fichier du poste), **Depuis une URL…** (ex. lien
-raw GitHub ou gist : pratique pour garder ses profils dans un dépôt), **Exporter**. Un fichier
-invalide est refusé avant de remplacer quoi que ce soit.
+From the panel: **Edit**, **Import…** (file from your computer), **From a URL…** (e.g. a raw
+GitHub or gist link: handy to keep your profiles in a repository), **Export**. An invalid file
+is rejected before anything is replaced.
 
 ### Format
 
@@ -66,25 +64,25 @@ invalide est refusé avant de remplacer quoi que ce soit.
 {
   "$schema": "https://raw.githubusercontent.com/jdelahayes/comfyui-profiles/main/profiles.schema.json",
   "profiles": {
-    "mon-profil": {
-      "description": "Texte libre, affiché dans le panneau et par `list`.",
-      "extends": ["krea2"],              // hérite de tout le contenu d'autres profils
+    "my-profile": {
+      "description": "Free text, shown in the panel and by `list`.",
+      "extends": ["krea2"],              // inherits the whole content of other profiles
       "models": [
-        // type = sous-dossier de ComfyUI/models (loras, vae, diffusion_models, checkpoints...)
-        {"type": "loras", "hf": "org/depot", "file": "chemin/dans/le/depot.safetensors"},
-        {"type": "loras", "hf": "org/depot", "file": "x.safetensors", "revision": "main", "name": "renomme.safetensors"},
-        {"type": "checkpoints", "civitai": 123456, "name": "mon_modele.safetensors"},   // id de VERSION du modèle
-        {"type": "vae", "github": "https://github.com/madebyollin/taehv.git", "file": "safetensors/taeh3.safetensors"},  // un seul fichier du dépôt
-        {"type": "upscale_models", "url": "https://exemple.com/4x.pth", "name": "4x.pth"}
+        // type = subfolder of ComfyUI/models (loras, vae, diffusion_models, checkpoints...)
+        {"type": "loras", "hf": "org/repo", "file": "path/in/the/repo.safetensors"},
+        {"type": "loras", "hf": "org/repo", "file": "x.safetensors", "revision": "main", "name": "renamed.safetensors"},
+        {"type": "checkpoints", "civitai": 123456, "name": "my_model.safetensors"},   // model VERSION id
+        {"type": "vae", "github": "https://github.com/madebyollin/taehv.git", "file": "safetensors/taeh3.safetensors"},  // a single file of the repo
+        {"type": "upscale_models", "url": "https://example.com/4x.pth", "name": "4x.pth"}
       ],
       "custom_nodes": [
-        {"git": "https://github.com/auteur/ComfyUI-Truc.git"},
-        {"git": "https://github.com/auteur/ComfyUI-Machin.git", "ref": "v1.2.0", "name": "Machin"},
-        // zip public sur Google Drive (lien de partage ou id du fichier)
-        {"gdrive": "https://drive.google.com/file/d/1AbC.../view?usp=sharing", "name": "ComfyUI-Bidule"}
+        {"git": "https://github.com/author/ComfyUI-Foo.git"},
+        {"git": "https://github.com/author/ComfyUI-Bar.git", "ref": "v1.2.0", "name": "Bar"},
+        // public zip on Google Drive (share link or file id)
+        {"gdrive": "https://drive.google.com/file/d/1AbC.../view?usp=sharing", "name": "ComfyUI-Baz"}
       ],
       "workflows": [
-        {"url": "https://exemple.com/workflow.json", "name": "mon_workflow.json"}
+        {"url": "https://example.com/workflow.json", "name": "my_workflow.json"}
       ],
       "pip": ["onnxruntime-gpu"]
     }
@@ -92,282 +90,271 @@ invalide est refusé avant de remplacer quoi que ce soit.
 }
 ```
 
-(Le vrai fichier est du JSON strict, sans commentaires. Les clés qui commencent par `//` sont
-ignorées et peuvent servir de commentaires.)
+(The real file is strict JSON, without comments. Keys starting with `//` are ignored and can
+be used as comments.)
 
-- **Sources** (modèles et workflows) : une seule par élément parmi `hf` (+ `file`, et
-  optionnellement `revision`), `github` (dépôt public `owner/depot` ou son URL, + `file`, et
-  optionnellement `revision` : branche, tag ou commit), `civitai` (id de version, utilise
-  `CIVITAI_TOKEN`) ou `url`. Avec `github`, seul le fichier est téléchargé, sans cloner le
-  dépôt (Git LFS compris). `name` fixe le nom du fichier local. Il est obligatoire pour
-  `civitai` et `url`, et vaut par défaut le nom de `file` pour `hf` et `github`.
-- **Destinations** : modèles dans les dossiers de leur type tels que ComfyUI les voit,
-  `extra_model_paths.yaml` compris (voir ci-dessous) ; custom nodes dans `custom_nodes/` (ou
-  dans `COMFY_PROFILES_NODES_STORE`, puis liés dans `custom_nodes/`) ; workflows dans
+- **Sources** (models and workflows): exactly one per item among `hf` (+ `file`, and
+  optionally `revision`), `github` (public repository `owner/repo` or its URL, + `file`, and
+  optionally `revision`: branch, tag or commit), `civitai` (version id, uses `CIVITAI_TOKEN`)
+  or `url`. With `github`, only the file is downloaded, without cloning the repository (Git
+  LFS included). `name` sets the local file name. It is required for `civitai` and `url`, and
+  defaults to the name of `file` for `hf` and `github`.
+- **Destinations**: models in the folders of their type as ComfyUI sees them,
+  `extra_model_paths.yaml` included (see below); custom nodes in `custom_nodes/` (or in
+  `COMFY_PROFILES_NODES_STORE`, then linked in `custom_nodes/`); workflows in
   `user/default/workflows/`.
-- **Dossiers de modèles** : un modèle est trouvé dans n'importe lequel des dossiers que ComfyUI
-  parcourt pour son type (ex. `unet/` ou `diffusion_models/`, et ceux de
-  `extra_model_paths.yaml`). S'il manque, il est téléchargé dans le premier de ces dossiers, dans
-  l'ordre de ComfyUI (un chemin `is_default: true` passe donc en tête), en préférant celui qui
-  porte le nom du type : `diffusion_models/` plutôt que `unet/`. Un sous-dossier dans `type`
-  (`diffusion_models/krea2`) fait partie du nom du modèle pour ComfyUI : un fichier rangé
-  ailleurs dans le dossier du type n'est pas reconnu.
-- **Dépendances Python** : le `requirements.txt` et le `install.py` des custom nodes, ainsi que
-  les paquets `pip`, sont installés dans l'environnement Python de ComfyUI. Ce qui a été
-  installé est noté dans cet environnement : un nouveau conteneur réinstalle les dépendances,
-  même si les custom nodes sont déjà sur un volume persistant.
-- **Version des custom nodes** : `ref` (optionnel) fixe une branche, un tag ou un commit. Sans
-  `ref`, la branche par défaut est clonée une fois puis jamais mise à jour. Si `ref` change, le
-  prochain `sync` bascule le clone existant dessus (seulement pour un node installé par le
-  gestionnaire). Une branche n'est pas remise à jour tant que `ref` reste le même.
-- **Custom nodes en zip sur Google Drive** : `gdrive` (lien de partage ou id du fichier, partagé
-  en « Tous les utilisateurs disposant du lien ») et `name` (nom du dossier, obligatoire). Le
-  zip est extrait dans `custom_nodes/<name>` ; s'il contient un unique dossier racine, c'est son
-  contenu qui est pris. Il n'est retéléchargé que si `gdrive` change : pour mettre à jour le
-  node, publie le nouveau zip comme un nouveau fichier Drive (ou supprime le dossier). Pour
-  protéger le contenu d'un lien public, chiffre le zip (7-Zip : format zip, chiffrement
-  AES-256) avec le mot de passe `GDRIVE_ZIP_PASSWORD`. Le chiffrement est détecté
-  automatiquement ; un zip non chiffré s'extrait sans mot de passe.
-- Une clé inconnue (faute de frappe) fait échouer la commande avant toute action.
+- **Model folders**: a model is found in any of the folders ComfyUI scans for its type (e.g.
+  `unet/` or `diffusion_models/`, and those of `extra_model_paths.yaml`). If it is missing, it
+  is downloaded into the first of these folders, in ComfyUI's order (so an `is_default: true`
+  path comes first), preferring the one named after the type: `diffusion_models/` rather than
+  `unet/`. A subfolder in `type` (`diffusion_models/krea2`) is part of the model name for
+  ComfyUI: a file stored elsewhere in the type's folder is not recognized.
+- **Python dependencies**: the custom nodes' `requirements.txt` and `install.py`, as well as
+  the `pip` packages, are installed in ComfyUI's Python environment. What was installed is
+  noted in that environment: a new container reinstalls the dependencies, even if the custom
+  nodes are already on a persistent volume.
+- **Custom node version**: `ref` (optional) pins a branch, a tag or a commit. Without `ref`, the
+  default branch is cloned once and never updated. If `ref` changes, the next `sync` switches
+  the existing clone to it (only for a node installed by the manager). A branch is not updated
+  again as long as `ref` stays the same.
+- **Custom nodes as a zip on Google Drive**: `gdrive` (share link or file id, shared with
+  "Anyone with the link") and `name` (folder name, required). The zip is extracted into
+  `custom_nodes/<name>`; if it holds a single root folder, its content is taken. It is only
+  downloaded again if `gdrive` changes: to update the node, publish the new zip as a new Drive
+  file (or delete the folder). To protect the content of a public link, encrypt the zip
+  (7-Zip: zip format, AES-256 encryption) with the `GDRIVE_ZIP_PASSWORD` password. Encryption
+  is detected automatically; an unencrypted zip is extracted without a password.
+- An unknown key (typo) makes the command fail before any action.
 
-## Ce qui est installé, ce qui est supprimé
+## What is installed, what is removed
 
-`sync` installe ce qui manque et ne touche jamais à ce qui est déjà présent (sauf
-`--update`, voir [Mise à jour](#mise-à-jour)). Ce que le
-gestionnaire installe lui-même est noté dans `user/__comfy_profiles/installed.json`, et
-`uninstall` ne supprime **que** ces éléments : un modèle copié à la main, un custom node déjà
-là (installé avec le Manager, livré avec une image Docker...) n'est jamais supprimé, ni changé
-de version, même si un profil le cite. Ses dépendances Python restent aussi l'affaire de celui
-qui l'a installé. Un custom node sans `.git` (installé par ComfyUI-Manager depuis le Comfy
-Registry) ne change jamais de version non plus, même pris en charge : son `ref` est ignoré.
+`sync` installs what is missing and never touches what is already there (except with
+`--update`, see [Update](#update)). What the manager installs itself is noted in
+`user/__comfy_profiles/installed.json`, and `uninstall` **only** removes these items: a model
+copied by hand, a custom node already there (installed with the Manager, shipped with a Docker
+image...) is never removed, nor changed to another version, even if a profile mentions it. Its
+Python dependencies also remain the business of whoever installed it. A custom node without
+`.git` (installed by ComfyUI-Manager from the Comfy Registry) never changes version either,
+even when managed: its `ref` is ignored.
 
-Un custom node déjà installé **sous un autre nom** est reconnu et laissé tel quel, au lieu d'être
-cloné une seconde fois (ComfyUI le chargerait deux fois) : même nom à la casse près, ou même
-dépôt (remote `origin` de son `.git`, ou `Repository` de son `pyproject.toml`). C'est le cas
-des nodes installés par ComfyUI-Manager depuis le Comfy Registry, rangés sous leur id du
-registry : `comfyui-kjnodes` pour `ComfyUI-KJNodes`.
+A custom node already installed **under another name** is recognized and left as is, instead
+of being cloned a second time (ComfyUI would load it twice): same name up to case, or same
+repository (`origin` remote of its `.git`, or `Repository` of its `pyproject.toml`). This is
+the case of nodes installed by ComfyUI-Manager from the Comfy Registry, stored under their
+registry id: `comfyui-kjnodes` for `ComfyUI-KJNodes`.
 
-`uninstall` supprime les modèles, workflows et custom nodes **propres** aux profils, sauf ce
-qui sert encore à un profil gardé : un profil de `COMFY_PROFILES`, ou un autre profil
-complètement installé, y compris ceux dont ils héritent. Exemple : désinstaller `krea2` (qui
-hérite de `krea2-common`) supprime son modèle de diffusion, mais garde le text encoder et le
-VAE de `krea2-common`. Avec `--with-extends` (case « Inclure les profils hérités » dans le
-panneau), les profils hérités sont désinstallés aussi : c'est ce qu'il faut pour un profil qui
-ne fait que regrouper d'autres profils. Les paquets pip ne sont jamais supprimés.
+`uninstall` removes the models, workflows and custom nodes **of the profiles themselves**,
+except what is still used by a kept profile: a profile of `COMFY_PROFILES`, or another fully
+installed profile, including those they inherit from. Example: uninstalling `krea2` (which
+inherits from `krea2-common`) removes its diffusion model, but keeps the text encoder and the
+VAE of `krea2-common`. With `--with-extends` ("Include the inherited profiles" checkbox in the
+panel), the inherited profiles are uninstalled too: this is what a profile that only groups
+other profiles needs. pip packages are never removed.
 
-Pour qu'`uninstall` puisse quand même supprimer ce qui était déjà là, **prends-le en charge** :
-`adopt PROFIL` (bouton « lien » du profil dans le panneau) inscrit au manifeste tout ce qui
-est présent pour le profil, `extends` compris. Les dépendances de ses custom nodes sont
-considérées comme déjà installées (le node fonctionnait déjà) : `sync` ne les relance pas. Le panneau signale ce qui n'est pas encore pris
-en charge : pastille orange « N non pris en charge » sur le profil, et mention sur chaque
-élément dans son détail.
+For `uninstall` to still remove what was already there, **take it over**: `adopt PROFILE`
+(the profile's "link" button in the panel) adds to the manifest everything present for the
+profile, `extends` included. The dependencies of its custom nodes are considered already
+installed (the node already worked): `sync` does not run them again. The panel shows what is
+not managed yet: orange "N not managed" chip on the profile, and a mention on each item in its
+details.
 
-### Mise à jour
+### Update
 
-`sync --update` (bouton **Mettre à jour** du panneau) installe ce qui manque, comme `sync`, et
-met aussi à jour ce que le gestionnaire a installé ou pris en charge, s'il a changé à la
-source :
+`sync --update` (the panel's **Update** button) installs what is missing, like `sync`, and
+also updates what the manager installed or took over, if it changed at the source:
 
-- **custom nodes git** : dernier commit de leur branche (celle de `ref`, sinon la branche par
-  défaut du dépôt ; un `ref` tag ou commit ne bouge pas). Un node dont des fichiers suivis par
-  git ont été modifiés sur place est laissé tel quel, comme un node sans `.git` (installé par
-  ComfyUI-Manager depuis le Comfy Registry : sa mise à jour se fait avec le Manager) ;
-- **custom nodes Google Drive** : le zip est retéléchargé et ne remplace le node que s'il
-  diffère de celui dont il provient (empreinte sha256 notée dans `.comfy-profiles-gdrive`) ;
-- **modèles et workflows** : la source est interrogée sans rien télécharger (ETag Hugging Face,
-  ou ETag / `Last-Modified` HTTP pour GitHub et les URL), et le fichier n'est retéléchargé que
-  s'il a changé. La version de chaque fichier est notée dans
-  `user/__comfy_profiles/versions.json`. Pour un fichier sans version notée (installé avant
-  cette fonction), un fichier Hugging Face est comparé à son empreinte (calculée une fois), un
-  autre à sa taille. CivitAI n'est jamais vérifié : le fichier d'une version de modèle ne
-  change pas ;
-- **paquets pip** : `pip install --upgrade`.
+- **git custom nodes**: latest commit of their branch (that of `ref`, otherwise the
+  repository's default branch; a tag or commit `ref` does not move). A node whose git-tracked
+  files were modified in place is left as is, like a node without `.git` (installed by
+  ComfyUI-Manager from the Comfy Registry: update it with the Manager);
+- **Google Drive custom nodes**: the zip is downloaded again and only replaces the node if it
+  differs from the one it comes from (sha256 checksum noted in `.comfy-profiles-gdrive`);
+- **models and workflows**: the source is queried without downloading anything (Hugging Face
+  ETag, or HTTP ETag / `Last-Modified` for GitHub and URLs), and the file is only downloaded
+  again if it changed. The version of each file is noted in
+  `user/__comfy_profiles/versions.json`. For a file without a noted version (installed before
+  this feature), a Hugging Face file is compared to its checksum (computed once), another one
+  to its size. CivitAI is never checked: the file of a model version does not change;
+- **pip packages**: `pip install --upgrade`.
 
-Les dépendances d'un custom node mis à jour sont réinstallées si son `requirements.txt` ou son
-`install.py` a changé. Ce que le gestionnaire n'a pas installé n'est jamais mis à jour : le
-prendre en charge d'abord (`adopt`). Après la mise à jour de custom nodes, redémarrer ComfyUI.
+The dependencies of an updated custom node are installed again if its `requirements.txt` or
+its `install.py` changed. What the manager did not install is never updated: take it over
+first (`adopt`). After updating custom nodes, restart ComfyUI.
 
-Mise à jour depuis une version sans manifeste : si les custom nodes sont rangés à part
-(`COMFY_PROFILES_NODES_STORE`), ce qui est déjà présent pour les profils du fichier est repris
-dans le manifeste à la première utilisation (ce stockage n'est rempli que par le gestionnaire).
+Upgrading from a version without a manifest: if custom nodes are stored separately
+(`COMFY_PROFILES_NODES_STORE`), what is already there for the profiles of the file is taken
+into the manifest at the first use (that storage is only filled by the manager).
 
-## Profils d'un workflow
+## Workflow profiles
 
-Le node **Profils du workflow** (*Workflow profiles*, catégorie *utils*) déclare dans un
-workflow les profils dont il a besoin. L'information voyage avec le workflow : qui le reçoit
-sait quoi installer.
+The **Workflow profiles** node (*utils* category) declares in a workflow the profiles it
+needs. The information travels with the workflow: whoever receives it knows what to install.
 
-- **profils** : noms des profils, séparés par des virgules (`krea2, essential-nodes`).
-- **source** (optionnel) : URL du fichier de profils qui les définit, par exemple un lien raw
-  GitHub. Un nom de profil n'a de sens que dans un fichier de profils donné : sans source, la
-  déclaration ne sert qu'à ceux qui ont déjà ces profils.
+- **profiles**: profile names, comma-separated (`krea2, essential-nodes`).
+- **source** (optional): URL of the profiles file that defines them, for instance a raw GitHub
+  link. A profile name only makes sense within a given profiles file: without a source, the
+  declaration is only useful to those who already have these profiles.
 
-Le node n'a ni entrée reliable ni sortie : ComfyUI ne l'exécute jamais, il ne change rien au
-résultat du workflow. Dans un ComfyUI sans ce plugin, il apparaît comme node manquant, ce qui
-signale qu'il faut installer comfyui-profiles.
+The node has no linkable input and no output: ComfyUI never executes it, it changes nothing in
+the workflow's result. In a ComfyUI without this plugin, it shows up as a missing node, which
+signals that comfyui-profiles must be installed.
 
-À l'ouverture d'un workflow qui contient ce node (sous-graphes compris), une notification
-signale les profils déclarés qui ne sont pas installés ou pas dans le fichier de profils. Le
-panneau affiche alors en tête une section **Ce workflow** : l'état de chaque profil déclaré,
-un bouton pour installer ce qui manque (un profil, ou tous ceux du workflow), et, pour un
-profil absent du fichier de profils, un bouton qui l'**ajoute depuis la source** du node. Cet
-ajout reprend le profil et ceux dont il hérite, sans remplacer le fichier : les profils déjà
-présents restent tels quels (signalés s'ils diffèrent de la source), et le reste du fichier
-garde sa mise en forme.
+When a workflow containing this node opens (subgraphs included), a notification lists the
+declared profiles that are not installed or not in the profiles file. The panel then shows a
+**This workflow** section at the top: the state of each declared profile, a button to install
+what is missing (one profile, or all those of the workflow), and, for a profile missing from
+the profiles file, a button that **adds it from the node's source**. This adds the profile and
+those it inherits from, without replacing the file: profiles already there stay as they are
+(reported if they differ from the source), and the rest of the file keeps its formatting.
 
-## Langue
+## Language
 
-Le panneau, les messages du script et les erreurs du serveur sont en français ou en anglais.
-Le panneau suit la langue de ComfyUI (réglage *Langue*) ; en ligne de commande, c'est
-`COMFY_PROFILES_LANG`, sinon `LC_ALL`, `LC_MESSAGES` ou `LANG`. L'anglais est la langue par
-défaut, et celle d'une langue non traduite. Changer la langue de ComfyUI demande de recharger
-la page.
+The panel, the script's messages and the server's errors are in English or French. The panel
+follows ComfyUI's language (*Language* setting); on the command line, it is
+`COMFY_PROFILES_LANG`, otherwise `LC_ALL`, `LC_MESSAGES` or `LANG`. English is the default
+language, and the one used for an untranslated language. Changing ComfyUI's language requires
+reloading the page.
 
-Pour ajouter une langue : copier `lang/en.json` en `lang/<code>.json` (ex. `de.json`) et
-traduire les valeurs. Les clés sont les messages français du code ; les `{variables}` doivent
-rester telles quelles. Un message absent reste en français.
+To add a language: copy `lang/fr.json` to `lang/<code>.json` (e.g. `de.json`) and translate the
+values. The keys are the English messages of the code; `{variables}` must stay as they are. A
+missing message stays in English.
 
-## Panneau
+## Panel
 
-- Liste des profils : description, taille, `extends`, badge *démarrage* pour ceux de
-  `COMFY_PROFILES`. Pour un profil qui n'est pas entièrement installé, un badge bleu
-  *… à télécharger* donne la taille des fichiers absents, que son installation ajouterait
-  (`extends` compris ; les custom nodes et paquets pip ne sont pas comptés). La couleur de
-  fond donne l'état : vert installé (tout est là, `extends` compris), orange partiel, neutre non installé. Seuls les éléments propres au profil comptent
-  pour « partiel », pas ceux hérités ; un profil qui ne fait que regrouper d'autres profils
-  est jugé sur leurs éléments hors de la base qu'ils ont tous en commun (pour
-  `minimax-h3-all-bf16` : les modèles fl2va et ref2va, pas `minimax-h3-common-bf16`).
-- Filtres de la liste, mémorisés dans le navigateur : texte sur le nom des profils et de leurs
-  éléments (`extends` compris), ou sur le nom des profils seulement ; profils finaux seulement
-  (ceux qu'aucun autre profil n'étend), avec en option ceux qu'étend seulement un profil de
-  regroupement (sans élément propre, ex. `minimax-h3-all-*`) ; état, en cliquant sur
-  *installé*, *partiellement installé* ou *non installé* dans la légende (plusieurs à la fois
-  possibles), et *non pris en charge* pour les profils qui ont des éléments non pris en charge. Un profil coché reste affiché.
-- Boutons par profil : installer (s'il n'est pas complètement installé), désinstaller (s'il
-  l'est, même partiellement), prendre en charge (s'il a des éléments non pris en charge),
-  détail de ce qui est présent ou non, regroupé par profil qui déclare chaque élément (le
-  profil lui-même, puis chaque profil hérité), avec la taille de chaque fichier (`?` tant
-  qu'elle n'est pas connue : « Recalculer les tailles » l'interroge à la source) et une
-  icône qui ouvre sa source (Hugging Face, GitHub, CivitAI, Google Drive, PyPI ou l'URL).
-- Synchronisation, dry-run, mise à jour (voir [Mise à jour](#mise-à-jour)) ou désinstallation
-  des profils cochés, avec les logs en direct.
-  Une seule action à la fois ; **Arrêter** l'interrompt (le clone en cours est abandonné sans
-  laisser de dossier incomplet ; les téléchargements gardent leur `.part`, voir
-  [Téléchargements](#téléchargements)).
-- Section **Ce workflow**, pour un workflow qui déclare ses profils : voir
-  [Profils d'un workflow](#profils-dun-workflow).
-- Fichier de profils : édition, import (fichier ou URL), export, retour au modèle.
-- **Recalculer les tailles** : lance `profile_sizes.py` sur le fichier de profils (seuls les
-  fichiers sans taille sont interrogés) ; **Tout recalculer** réinterroge aussi ceux dont la
-  taille est connue (`--force`).
-- **Configuration** (engrenage à côté du titre) : réglages des téléchargements (voir
-  [Téléchargements](#téléchargements)) et suppression des téléchargements partiels.
-- Redémarrage de ComfyUI, nécessaire après l'installation de nouveaux custom nodes : même
-  processus relancé, ou relance par comfy-cli quand ComfyUI tourne sous `comfy launch`.
+- Profile list: description, size, `extends`, *startup* badge for those of `COMFY_PROFILES`.
+  For a profile that is not fully installed, a blue *… to download* badge gives the size of the
+  missing files that installing it would add (`extends` included; custom nodes and pip
+  packages are not counted). The background color gives the state: green installed
+  (everything is there, `extends` included), orange partial, neutral not installed. Only the
+  profile's own items count for "partial", not the inherited ones; a profile that only groups
+  other profiles is judged on their items outside the base they all share (for
+  `minimax-h3-all-bf16`: the fl2va and ref2va models, not `minimax-h3-common-bf16`).
+- List filters, remembered in the browser: text on the names of the profiles and of their
+  items (`extends` included), or on the profile names only; final profiles only (those no
+  other profile extends), optionally with those extended only by a grouping profile (without
+  items of its own, e.g. `minimax-h3-all-*`); state, by clicking *installed*, *partially
+  installed* or *not installed* in the legend (several at once possible), and *not managed*
+  for the profiles that have unmanaged items. A checked profile stays shown.
+- Buttons per profile: install (if it is not fully installed), uninstall (if it is, even
+  partially), take over (if it has unmanaged items), details of what is present or not, grouped
+  by the profile declaring each item (the profile itself, then each inherited profile), with
+  the size of each file (`?` as long as it is unknown: "Recalculate sizes" queries it at the
+  source) and an icon that opens its source (Hugging Face, GitHub, CivitAI, Google Drive, PyPI
+  or the URL).
+- Sync, dry-run, update (see [Update](#update)) or uninstall of the checked profiles, with live
+  logs. One action at a time; **Stop** interrupts it (the current clone is abandoned without
+  leaving an incomplete folder; downloads keep their `.part`, see [Downloads](#downloads)).
+- **This workflow** section, for a workflow that declares its profiles: see
+  [Workflow profiles](#workflow-profiles).
+- Profiles file: edit, import (file or URL), export, back to template.
+- **Recalculate sizes**: runs `profile_sizes.py` on the profiles file (only the files without
+  a size are queried); **Recalculate all** also queries again those whose size is known
+  (`--force`).
+- **Settings** (gear next to the title): download settings (see [Downloads](#downloads)) and
+  deletion of partial downloads.
+- Restart of ComfyUI, needed after installing new custom nodes: same process started again, or
+  restarted by comfy-cli when ComfyUI runs under `comfy launch`.
 
-Toute personne qui a accès à l'UI peut installer des profils, modifier leur fichier et
-redémarrer ComfyUI. Sur une instance partagée, `COMFY_PROFILES_READONLY=1` limite le panneau à
-la consultation et au dry-run.
+Anyone with access to the UI can install profiles, change their file and restart ComfyUI. On
+a shared instance, `COMFY_PROFILES_READONLY=1` limits the panel to browsing and dry-run.
 
-## Téléchargements
+## Downloads
 
-- **En parallèle** : les modèles et workflows sont téléchargés plusieurs à la fois (3 par
-  défaut), une fois les custom nodes et paquets pip installés, un à un. Les logs montrent une
-  seule ligne de progression pour tous les fichiers en cours (pourcentage, taille, débit).
-- **Reprise** : un téléchargement CivitAI, GitHub, URL ou Google Drive interrompu (Arrêter,
-  coupure, conteneur arrêté) laisse un fichier `<nom>.part` (ignoré par ComfyUI), repris où il
-  en était par la synchronisation suivante, si le serveur accepte les requêtes partielles et
-  que le fichier n'a pas changé à la source (sinon il repart de zéro). Une coupure réseau en
-  cours de route est reprise aussitôt (5 essais). Hugging Face passe par `huggingface_hub`
-  (Xet), qui ne sait pas reprendre : un fichier interrompu repart de zéro.
-- **Hugging Face** : mode haute performance de Xet (`HF_XET_HIGH_PERFORMANCE`) activé par
-  défaut : plus de connexions et de mémoire par fichier.
+- **In parallel**: models and workflows are downloaded several at a time (3 by default), once
+  custom nodes and pip packages are installed, one by one. The logs show a single progress
+  line for all the running files (percentage, size, throughput).
+- **Resume**: an interrupted CivitAI, GitHub, URL or Google Drive download (Stop, network
+  drop, container stopped) leaves a `<name>.part` file (ignored by ComfyUI), resumed where it
+  stopped by the next sync, if the server accepts partial requests and the file has not
+  changed at the source (otherwise it starts over). A network drop along the way is resumed
+  right away (5 attempts). Hugging Face goes through `huggingface_hub` (Xet), which cannot
+  resume: an interrupted file starts over.
+- **Hugging Face**: Xet high performance mode (`HF_XET_HIGH_PERFORMANCE`) enabled by default:
+  more connections and memory per file.
 
-Réglages : panneau **Configuration**, ou `comfy_profiles.py settings`. Ils sont enregistrés dans
-`<user>/__comfy_profiles/settings.json` et valent pour toutes les synchronisations suivantes, y
-compris celle du démarrage d'un conteneur. Ordre de priorité : valeur enregistrée, sinon
-variable d'environnement, sinon défaut.
+Settings: the panel's **Settings**, or `comfy_profiles.py settings`. They are saved in
+`<user>/__comfy_profiles/settings.json` and apply to all the following syncs, including the one
+at container startup. Priority order: saved value, otherwise environment variable, otherwise
+default.
 
-| Réglage | Variable d'environnement | Défaut |
+| Setting | Environment variable | Default |
 |---|---|---|
-| `jobs` : fichiers téléchargés à la fois (1 à 16) | `COMFY_PROFILES_JOBS` | 3 |
-| `hf_high_performance` : mode haute performance de Xet | `HF_XET_HIGH_PERFORMANCE` | activé |
+| `jobs`: files downloaded at a time (1 to 16) | `COMFY_PROFILES_JOBS` | 3 |
+| `hf_high_performance`: Xet high performance mode | `HF_XET_HIGH_PERFORMANCE` | enabled |
 
-Les téléchargements partiels restent sur le disque tant qu'ils ne sont pas repris : le panneau
-Configuration les compte et peut les supprimer (`settings --clean-partials`).
+Partial downloads stay on disk until they are resumed: the panel's Settings counts them and
+can delete them (`settings --clean-partials`).
 
-## Ligne de commande
+## Command line
 
 ```bash
-comfy_profiles.py [--config FICHIER] list [--json]
-comfy_profiles.py [--config FICHIER] where                    # fichier utilisé et son origine (JSON)
-comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
-comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--jobs N] [--dry-run]
-comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
-comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
-comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials]   # réglages (JSON)
-profile_sizes.py [--config FICHIER] [--env FICHIER] [--force] [--dry-run]
+comfy_profiles.py [--config FILE] list [--json]
+comfy_profiles.py [--config FILE] where                    # file in use and its origin (JSON)
+comfy_profiles.py [--config FILE] show PROFILE[,PROFILE...] [--json]
+comfy_profiles.py [--config FILE] sync [PROFILE[,PROFILE...]] [--update] [--jobs N] [--dry-run]
+comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json]
+comfy_profiles.py [--config FILE] adopt PROFILE[,PROFILE...] [--dry-run] [--json]
+comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials]   # settings (JSON)
+profile_sizes.py [--config FILE] [--env FILE] [--force] [--dry-run]
 ```
 
-À lancer avec le Python de ComfyUI (les dépendances s'y installent). Le dossier de ComfyUI est
-`COMFY_HOME`, sinon celui dont ce dépôt est un custom node. Exemple : synchroniser des profils
-au démarrage d'un conteneur, avant de lancer ComfyUI :
+Run with ComfyUI's Python (dependencies get installed there). The ComfyUI folder is
+`COMFY_HOME`, otherwise the one this repository is a custom node of. Example: sync profiles at
+container startup, before starting ComfyUI:
 
 ```bash
 COMFY_PROFILES=krea2,flux2-klein-9b python custom_nodes/comfyui-profiles/comfy_profiles.py sync
 ```
 
-`profile_sizes.py` n'interroge que les fichiers sans taille (`--force` : tous) et conserve la
-mise en forme du fichier. `--env` reprend `HF_TOKEN` / `CIVITAI_TOKEN` d'un fichier `.env`
-quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout ComfyUI avec
-`--config`, par exemple sur le `profiles.json` d'un dépôt.
+`profile_sizes.py` only queries the files without a size (`--force`: all of them) and keeps
+the file's formatting. `--env` takes `HF_TOKEN` / `CIVITAI_TOKEN` from a `.env` file when they
+are not in the environment. It also works outside any ComfyUI with `--config`, for instance on
+the `profiles.json` of a repository.
 
-## Variables d'environnement
+## Environment variables
 
-| Variable | Rôle | Défaut |
+| Variable | Role | Default |
 |---|---|---|
-| `COMFY_PROFILES_SEED` | modèle de fichier de profils (lecture seule) | `examples/profiles.example.json` |
-| `COMFY_PROFILES_CONFIG` | fichier de profils imposé (copié depuis le modèle s'il n'existe pas) | — |
-| `COMFY_PROFILES` | profils synchronisés par `sync` sans argument (badge *démarrage*) | — |
-| `COMFY_PROFILES_NODES_STORE` | dossier où cloner les custom nodes, liés ensuite dans `custom_nodes/` (ex. un volume persistant) | `custom_nodes/` |
-| `COMFY_PROFILES_READONLY` | `1` : panneau en lecture seule | — |
-| `COMFY_HOME` | dossier de ComfyUI (ligne de commande) | le ComfyUI parent de ce dépôt |
-| `COMFY_MODELS_DIR`, `COMFY_CUSTOM_NODES_DIR`, `COMFY_USER_DIR` | chemins de ComfyUI (passés par le panneau) | sous `COMFY_HOME` |
-| `COMFY_MODEL_FOLDERS` | dossiers de chaque type de modèle, en JSON (passés par le panneau) | dossiers par défaut + `extra_model_paths.yaml` |
-| `COMFY_EXTRA_MODEL_PATHS` | autres fichiers `extra_model_paths` (séparés par `:`), comme `--extra-model-paths-config` (ligne de commande) | — |
-| `HF_TOKEN`, `CIVITAI_TOKEN` | téléchargements authentifiés | — |
-| `COMFY_PROFILES_JOBS` | fichiers téléchargés à la fois, si le réglage `jobs` n'est pas enregistré | 3 |
-| `HF_XET_HIGH_PERFORMANCE` | `0` : désactive le mode haute performance de Xet, si le réglage n'est pas enregistré | activé |
-| `GDRIVE_ZIP_PASSWORD` | zips chiffrés des custom nodes `gdrive` | — |
-| `COMFY_PROFILES_SCRIPT` | autre `comfy_profiles.py` à utiliser par le panneau | celui de ce dépôt |
+| `COMFY_PROFILES_SEED` | template profiles file (read-only) | `examples/profiles.example.json` |
+| `COMFY_PROFILES_CONFIG` | imposed profiles file (copied from the template if it does not exist) | — |
+| `COMFY_PROFILES` | profiles synced by `sync` without an argument (*startup* badge) | — |
+| `COMFY_PROFILES_NODES_STORE` | folder where custom nodes are cloned, then linked in `custom_nodes/` (e.g. a persistent volume) | `custom_nodes/` |
+| `COMFY_PROFILES_READONLY` | `1`: read-only panel | — |
+| `COMFY_HOME` | ComfyUI folder (command line) | the ComfyUI this repository is in |
+| `COMFY_MODELS_DIR`, `COMFY_CUSTOM_NODES_DIR`, `COMFY_USER_DIR` | ComfyUI paths (passed by the panel) | under `COMFY_HOME` |
+| `COMFY_MODEL_FOLDERS` | folders of each model type, as JSON (passed by the panel) | default folders + `extra_model_paths.yaml` |
+| `COMFY_EXTRA_MODEL_PATHS` | other `extra_model_paths` files (separated by `:`), like `--extra-model-paths-config` (command line) | — |
+| `HF_TOKEN`, `CIVITAI_TOKEN` | authenticated downloads | — |
+| `COMFY_PROFILES_JOBS` | files downloaded at a time, if the `jobs` setting is not saved | 3 |
+| `HF_XET_HIGH_PERFORMANCE` | `0`: disables Xet high performance mode, if the setting is not saved | enabled |
+| `GDRIVE_ZIP_PASSWORD` | encrypted zips of `gdrive` custom nodes | — |
+| `COMFY_PROFILES_LANG` | language of the messages (`en`, `fr`) | from the locale, otherwise `en` |
+| `COMFY_PROFILES_SCRIPT` | other `comfy_profiles.py` for the panel to use | the one of this repository |
 
-## Intégration dans une image Docker
+## Integration in a Docker image
 
-Le minimum :
+The minimum:
 
 ```dockerfile
-RUN git clone --branch v0.7.1 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.8.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
 ```
 
-- Les profils de l'image servent de modèle, et ceux que l'utilisateur modifie vivent dans
-  `user/`. Si `user/` est sur un volume persistant, son fichier de profils et le manifeste le
-  sont aussi.
-- Avec des custom nodes sur un volume : `COMFY_PROFILES_NODES_STORE=<volume>/custom_nodes`.
-  Les custom nodes copiés dans l'image (de vrais dossiers dans `custom_nodes/`) ne sont alors
-  jamais touchés.
-- Synchronisation au démarrage : `comfy_profiles.py sync` dans l'entrypoint, avec
-  `COMFY_PROFILES`.
+- The image's profiles serve as the template, and those the user changes live in `user/`. If
+  `user/` is on a persistent volume, the user's profiles file and the manifest are too.
+- With custom nodes on a volume: `COMFY_PROFILES_NODES_STORE=<volume>/custom_nodes`. The custom
+  nodes copied into the image (real folders in `custom_nodes/`) are then never touched.
+- Sync at startup: `comfy_profiles.py sync` in the entrypoint, with `COMFY_PROFILES`.
 
-## Publication sur le Comfy Registry
+## Publishing to the Comfy Registry
 
-`pyproject.toml` décrit le node pour le [Comfy Registry](https://registry.comfy.org). Le
-workflow **Publish to Comfy registry** (manuel) publie la version de `pyproject.toml` ; il faut
-un publisher sur le registry (`PublisherId`) et son token dans le secret
-`REGISTRY_ACCESS_TOKEN`. Penser à aligner `version` sur le tag git.
+`pyproject.toml` describes the node for the [Comfy Registry](https://registry.comfy.org). The
+**Publish to Comfy registry** workflow (manual) publishes the `pyproject.toml` version; it
+needs a publisher on the registry (`PublisherId`) and its token in the `REGISTRY_ACCESS_TOKEN`
+secret. Remember to align `version` with the git tag.
 
-## Licence
+## License
 
-MIT, voir [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

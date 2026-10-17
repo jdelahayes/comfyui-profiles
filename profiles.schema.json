@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/jdelahayes/comfyui-profiles/main/profiles.schema.json",
   "title": "Profils comfyui-profiles",
-  "description": "Fichier de profils d'utilisation ComfyUI : modèles, custom nodes, workflows et paquets pip de chaque usage. Les clés qui commencent par // sont des commentaires.",
+  "description": "ComfyUI usage profiles file: models, custom nodes, workflows and pip packages of each use case. Keys starting with // are comments.",
   "type": "object",
   "required": ["profiles"],
   "properties": {
@@ -20,11 +20,11 @@
     "profile": {
       "type": "object",
       "properties": {
-        "description": {"type": "string", "description": "Texte libre, affiché dans le panneau et par `list`."},
-        "size": {"type": "string", "description": "Taille totale, calculée par profile_sizes.py (informatif)."},
+        "description": {"type": "string", "description": "Free text, shown in the panel and by `list`."},
+        "size": {"type": "string", "description": "Total size, computed by profile_sizes.py (informative)."},
         "extends": {
           "type": "array",
-          "description": "Profils dont celui-ci reprend tout le contenu.",
+          "description": "Profiles whose whole content this one includes.",
           "items": {"type": "string"}
         },
         "models": {"type": "array", "items": {"$ref": "#/$defs/model"}},
@@ -32,7 +32,7 @@
         "custom_nodes": {"type": "array", "items": {"$ref": "#/$defs/custom_node"}},
         "pip": {
           "type": "array",
-          "description": "Paquets pip (spécifications pip install).",
+          "description": "pip packages (pip install specs).",
           "items": {"type": "string"}
         }
       },
@@ -41,16 +41,16 @@
     },
     "file": {
       "type": "object",
-      "description": "Un fichier à télécharger, depuis une seule source : hf, github, civitai ou url.",
+      "description": "A file to download, from a single source: hf, github, civitai or url.",
       "properties": {
-        "hf": {"type": "string", "description": "Dépôt Hugging Face (org/depot), avec file."},
-        "github": {"type": "string", "description": "Dépôt GitHub public (owner/depot ou son URL), avec file. Seul le fichier est téléchargé."},
-        "civitai": {"type": "integer", "description": "Id de VERSION d'un modèle CivitAI (CIVITAI_TOKEN), avec name."},
-        "url": {"type": "string", "description": "URL directe, avec name."},
-        "file": {"type": "string", "description": "Chemin du fichier dans le dépôt (hf, github)."},
-        "revision": {"type": "string", "description": "Branche, tag ou commit (hf, github)."},
-        "name": {"type": "string", "description": "Nom du fichier local. Défaut : le nom de file (hf, github)."},
-        "size": {"type": "integer", "description": "Taille en octets, calculée par profile_sizes.py."}
+        "hf": {"type": "string", "description": "Hugging Face repository (org/repo), with file."},
+        "github": {"type": "string", "description": "Public GitHub repository (owner/repo or its URL), with file. Only the file is downloaded."},
+        "civitai": {"type": "integer", "description": "VERSION id of a CivitAI model (CIVITAI_TOKEN), with name."},
+        "url": {"type": "string", "description": "Direct URL, with name."},
+        "file": {"type": "string", "description": "Path of the file in the repository (hf, github)."},
+        "revision": {"type": "string", "description": "Branch, tag or commit (hf, github)."},
+        "name": {"type": "string", "description": "Local file name. Default: the name of file (hf, github)."},
+        "size": {"type": "integer", "description": "Size in bytes, computed by profile_sizes.py."}
       },
       "oneOf": [
         {"required": ["hf", "file"]},
@@ -64,16 +64,16 @@
       "allOf": [{"$ref": "#/$defs/file"}],
       "required": ["type"],
       "properties": {
-        "type": {"type": "string", "description": "Sous-dossier de models/ : checkpoints, loras, vae, diffusion_models, text_encoders... (peut contenir un sous-dossier, ex. diffusion_models/krea2)."}
+        "type": {"type": "string", "description": "Subfolder of models/: checkpoints, loras, vae, diffusion_models, text_encoders... (may contain a subfolder, e.g. diffusion_models/krea2)."}
       }
     },
     "custom_node": {
       "type": "object",
       "properties": {
-        "git": {"type": "string", "description": "URL du dépôt git."},
-        "ref": {"type": "string", "description": "Branche, tag ou commit (git seulement)."},
-        "gdrive": {"type": "string", "description": "Zip public sur Google Drive (lien de partage ou id), avec name. Chiffré : GDRIVE_ZIP_PASSWORD."},
-        "name": {"type": "string", "description": "Nom du dossier dans custom_nodes/. Défaut : le nom du dépôt git."}
+        "git": {"type": "string", "description": "URL of the git repository."},
+        "ref": {"type": "string", "description": "Branch, tag or commit (git only)."},
+        "gdrive": {"type": "string", "description": "Public zip on Google Drive (share link or id), with name. Encrypted: GDRIVE_ZIP_PASSWORD."},
+        "name": {"type": "string", "description": "Folder name in custom_nodes/. Default: the name of the git repository."}
       },
       "oneOf": [
         {"required": ["git"], "not": {"required": ["gdrive"]}},

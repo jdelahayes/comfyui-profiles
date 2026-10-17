@@ -1,5 +1,5 @@
-# Publie la version de pyproject.toml sur le Comfy Registry. Manuel uniquement : nécessite un
-# publisher sur https://registry.comfy.org et son token dans le secret REGISTRY_ACCESS_TOKEN.
+# Publishes the pyproject.toml version to the Comfy Registry. Manual only: needs a publisher on
+# https://registry.comfy.org and its token in the REGISTRY_ACCESS_TOKEN secret.
 name: Publish to Comfy registry
 
 on:

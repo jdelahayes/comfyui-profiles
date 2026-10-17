@@ -1,58 +1,57 @@
 #!/usr/bin/env python3
-"""Profils d'utilisation ComfyUI : chaque profil décrit les
-modèles, custom nodes, workflows et paquets pip dont il a besoin. `sync` installe ce qui
-manque et ne touche jamais à ce qui est déjà présent — relançable à volonté (par exemple à
-chaque démarrage d'un conteneur, pour les profils de COMFY_PROFILES).
+"""ComfyUI usage profiles: each profile describes the models, custom nodes, workflows and pip
+packages it needs. `sync` installs what is missing and never touches what is already there —
+safe to run again and again (for instance at each container startup, for the profiles in
+COMFY_PROFILES).
 
 Usage:
-  comfy_profiles.py [--config FICHIER] list [--json]
-  comfy_profiles.py [--config FICHIER] where
-  comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
-  comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--jobs N] [--dry-run]
-  comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
-  comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
+  comfy_profiles.py [--config FILE] list [--json]
+  comfy_profiles.py [--config FILE] where
+  comfy_profiles.py [--config FILE] show PROFILE[,PROFILE...] [--json]
+  comfy_profiles.py [--config FILE] sync [PROFILE[,PROFILE...]] [--update] [--jobs N] [--dry-run]
+  comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json]
+  comfy_profiles.py [--config FILE] adopt PROFILE[,PROFILE...] [--dry-run] [--json]
   comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials] [--json]
 
-Fichier de profils, le premier trouvé :
-  1. --config FICHIER
-  2. $COMFY_PROFILES_CONFIG (s'il est absent, le modèle y est d'abord copié)
-  3. <user>/__comfy_profiles/profiles.json : celui qu'écrivent l'édition et l'import du panneau
-  4. le modèle, en lecture seule : $COMFY_PROFILES_SEED, sinon examples/profiles.example.json
-Profils synchronisés par défaut : $COMFY_PROFILES (séparés par des virgules).
-`sync --update` met aussi à jour ce que le gestionnaire a installé ou pris en charge (voir
-Manifest), s'il a changé à la source : custom nodes git (dernier commit de leur branche) ou
-Drive (zip différent), modèles et workflows (ETag Hugging Face ou HTTP ; jamais CivitAI, dont
-un fichier ne change pas), paquets pip (--upgrade). Un custom node modifié sur place est laissé.
-`uninstall` supprime les modèles, workflows et custom nodes propres à des profils (avec
---with-extends : aussi ceux des profils dont ils héritent), sauf ceux dont a encore besoin un
-autre profil installé (voir plan_uninstall) et ceux que le gestionnaire n'a pas installés
-lui-même (voir Manifest). Les paquets pip restent dans le venv.
-Téléchargements : les modèles et workflows sont téléchargés plusieurs à la fois (--jobs, sinon
-le réglage `jobs`, voir `settings`), les custom nodes et paquets pip avant, un à un. Un
-téléchargement CivitAI, GitHub, URL ou Drive interrompu laisse un fichier .part, repris où il
-en était par la synchro suivante ; une coupure réseau est reprise aussitôt. Hugging Face passe
-par huggingface_hub (Xet), qui repart de zéro.
-Ctrl+C (SIGINT) interrompt `sync` : le clone en cours est abandonné sans laisser de dossier
-incomplet, les téléchargements laissent leur .part.
-`settings` : réglages des téléchargements, dans <user>/__comfy_profiles/settings.json (édités
-par le panneau, voir DOWNLOAD_SETTINGS), et téléchargements partiels (--clean-partials : les
-supprime). Résultat en JSON.
---json (list, show, uninstall) : résultat en JSON sur stdout, messages d'information sur stderr (utilisé
-par le panneau Profils dans ComfyUI, voir __init__.py).
+Profiles file, the first one found:
+  1. --config FILE
+  2. $COMFY_PROFILES_CONFIG (if missing, the template is copied there first)
+  3. <user>/__comfy_profiles/profiles.json: the one written by editing and importing in the panel
+  4. the template, read-only: $COMFY_PROFILES_SEED, otherwise examples/profiles.example.json
+Profiles synced by default: $COMFY_PROFILES (comma-separated).
+`sync --update` also updates what the manager installed or took over (see Manifest), if it
+changed at the source: git custom nodes (latest commit of their branch) or Drive ones (different
+zip), models and workflows (Hugging Face or HTTP ETag; never CivitAI, whose files don't change),
+pip packages (--upgrade). A custom node modified in place is left alone.
+`uninstall` removes the models, workflows and custom nodes of the profiles themselves (with
+--with-extends: also those of the profiles they inherit from), except those still needed by
+another installed profile and those the manager did not install itself. pip packages stay in
+the venv.
+Downloads: models and workflows are downloaded several at a time (--jobs, otherwise the `jobs`
+setting, see `settings`), custom nodes and pip packages first, one by one. An interrupted
+CivitAI, GitHub, URL or Drive download leaves a .part file, resumed where it stopped by the
+next sync; a network drop is resumed right away. Hugging Face goes through huggingface_hub
+(Xet), which starts over.
+Ctrl+C (SIGINT) stops `sync`: the current clone is abandoned without leaving an incomplete
+folder, downloads keep their .part.
+`settings`: download settings, in <user>/__comfy_profiles/settings.json (edited by the panel,
+see DOWNLOAD_SETTINGS), and partial downloads (--clean-partials: deletes them). Result as JSON.
+--json (list, show, uninstall): result as JSON on stdout, information messages on stderr (used
+by the Profiles panel in ComfyUI).
 
-Destinations (le panneau passe les chemins de ComfyUI lui-même ; en ligne de commande, ils se
-déduisent de $COMFY_HOME, sinon du ComfyUI dont ce dépôt est un custom node) :
-  modèles      -> $COMFY_MODELS_DIR/<type>/            (défaut : $COMFY_HOME/models)
-  custom nodes -> $COMFY_PROFILES_NODES_STORE/<nom>, lié dans $COMFY_CUSTOM_NODES_DIR/
-                  (défaut : directement dans $COMFY_HOME/custom_nodes/) ; clonés depuis git,
-                  ou extraits d'un zip public sur Google Drive (chiffré ou non : mot de passe
-                  dans $GDRIVE_ZIP_PASSWORD)
-  workflows    -> $COMFY_USER_DIR/default/workflows/   (défaut : $COMFY_HOME/user)
-Les dépendances Python (custom nodes, pip) sont installées dans le Python qui lance ce script
-et notées dans son environnement (venv) : un nouveau conteneur les réinstalle, même si les
-custom nodes sont déjà sur un volume persistant.
+Destinations (the panel passes ComfyUI's own paths; on the command line they are derived from
+$COMFY_HOME, otherwise from the ComfyUI this repository is a custom node of):
+  models       -> $COMFY_MODELS_DIR/<type>/            (default: $COMFY_HOME/models)
+  custom nodes -> $COMFY_PROFILES_NODES_STORE/<name>, linked in $COMFY_CUSTOM_NODES_DIR/
+                  (default: directly in $COMFY_HOME/custom_nodes/); cloned from git, or
+                  extracted from a public zip on Google Drive (encrypted or not: password in
+                  $GDRIVE_ZIP_PASSWORD)
+  workflows    -> $COMFY_USER_DIR/default/workflows/   (default: $COMFY_HOME/user)
+Python dependencies (custom nodes, pip) are installed in the Python running this script and
+recorded in its environment (venv): a new container reinstalls them, even if the custom nodes
+are already on a persistent volume.
 
-Langue des messages : $COMFY_PROFILES_LANG, sinon $LC_ALL, $LC_MESSAGES ou $LANG (en, fr).
+Messages language: $COMFY_PROFILES_LANG, otherwise $LC_ALL, $LC_MESSAGES or $LANG (en, fr).
 """
 import argparse
 import collections
@@ -82,23 +81,23 @@ from profiles_i18n import doc, human_size, t
 
 HERE = Path(__file__).resolve().parent
 EXAMPLE_CONFIG = HERE / "examples" / "profiles.example.json"
-# Dossier « System User » de ComfyUI (préfixe __) : jamais servi par ses routes HTTP
-# (/api/userdata...), seul ce module y lit et écrit. Contient le fichier de profils de
-# l'utilisateur et le manifeste de ce qui a été installé.
+# ComfyUI "System User" folder (__ prefix): never served by its HTTP routes (/api/userdata...),
+# only this module reads and writes there. Holds the user's profiles file and the manifest of
+# what was installed.
 DATA_DIR_NAME = "__comfy_profiles"
 CONFIG_NAME = "profiles.json"
 MANIFEST_NAME = "installed.json"
 VERSIONS_NAME = "versions.json"
 SETTINGS_NAME = "settings.json"
 SECTIONS = ("custom_nodes", "pip", "models", "workflows")
-# "size" : total calculé par profile_sizes.py (informatif, ignoré par sync).
+# "size": total computed by profile_sizes.py (informative, ignored by sync).
 PROFILE_KEYS = {"description", "size", "extends", *SECTIONS}
 SOURCES = ("hf", "github", "url", "civitai")
-# Cloudflare (devant civitai.com notamment) rejette le User-Agent par défaut de urllib.
+# Cloudflare (in front of civitai.com notably) rejects urllib's default User-Agent.
 USER_AGENT = "comfyui-profiles"
-# Téléchargements HTTP (CivitAI, GitHub, URL, Drive) : reprises après une coupure réseau.
+# HTTP downloads (CivitAI, GitHub, URL, Drive): retries after a network drop.
 HTTP_RETRIES = 5
-# Dans le venv, donc propre à ce conteneur : un nouveau conteneur réinstalle les dépendances.
+# In the venv, hence specific to this container: a new container reinstalls the dependencies.
 MARKER_DIR = Path(sys.prefix) / ".comfy-profiles"
 
 
@@ -111,7 +110,7 @@ def env_path(name, default):
 
 
 def default_comfy_home():
-    """Le ComfyUI dont ce dépôt est un custom node (<ComfyUI>/custom_nodes/comfyui-profiles)."""
+    """The ComfyUI this repository is a custom node of (<ComfyUI>/custom_nodes/comfyui-profiles)."""
     return HERE.parent.parent if HERE.parent.name == "custom_nodes" else None
 
 
@@ -119,25 +118,25 @@ class Paths:
     def __init__(self):
         home = os.environ.get("COMFY_HOME") or default_comfy_home()
         if not home:
-            sys.exit("!! " + t("Dossier de ComfyUI inconnu : indique-le dans COMFY_HOME"))
+            sys.exit("!! " + t("Unknown ComfyUI folder: set it in COMFY_HOME"))
         self.comfy_home = Path(home)
         self.models = env_path("COMFY_MODELS_DIR", self.comfy_home / "models")
         self.custom_nodes = env_path("COMFY_CUSTOM_NODES_DIR", self.comfy_home / "custom_nodes")
-        # Ailleurs que custom_nodes/ (ex. un volume persistant) : chaque node y est cloné puis
-        # lié dans custom_nodes/.
+        # Somewhere other than custom_nodes/ (e.g. a persistent volume): each node is cloned
+        # there, then linked in custom_nodes/.
         self.custom_nodes_store = env_path("COMFY_PROFILES_NODES_STORE", self.custom_nodes)
         self.user = env_path("COMFY_USER_DIR", self.comfy_home / "user")
         self.workflows = self.user / "default" / "workflows"
         self.data = self.user / DATA_DIR_NAME
-        # Hors des sous-dossiers <type>/ : jamais scanné par ComfyUI.
+        # Outside the <type>/ subfolders: never scanned by ComfyUI.
         self.staging = self.models / ".staging"
         self.model_folders = model_folders(self)
 
     def model_path(self, type_, name):
-        """Chemin d'un modèle de type `type_` (ex. loras, diffusion_models/krea2) : là où il est
-        déjà, dans l'un des dossiers que ComfyUI parcourt pour ce type (extra_model_paths.yaml
-        compris), sinon dans le premier de ces dossiers qui porte le nom du type (ex.
-        comfyModels/diffusion_models plutôt que comfyModels/unet), sinon dans le premier."""
+        """Path of a model of type `type_` (e.g. loras, diffusion_models/krea2): where it already
+        is, in one of the folders ComfyUI scans for this type (extra_model_paths.yaml
+        included), otherwise in the first of these folders named after the type (e.g.
+        comfyModels/diffusion_models rather than comfyModels/unet), otherwise in the first one."""
         folder, _, sub = type_.partition("/")
         bases = [Path(b) for b in self.model_folders.get(LEGACY_FOLDERS.get(folder, folder), [])]
         default = self.models / type_ / name
@@ -149,23 +148,23 @@ class Paths:
         return preferred / sub / name if preferred else default
 
     def model_roots(self):
-        """Dossiers de modèles de premier niveau (jamais supprimés, même vides)."""
+        """Top-level model folders (never removed, even when empty)."""
         return {self.models, *(Path(b) for paths in self.model_folders.values() for b in paths)}
 
 
-# Noms historiques de dossiers de modèles, comme dans ComfyUI (folder_paths.map_legacy).
+# Legacy model folder names, as in ComfyUI (folder_paths.map_legacy).
 LEGACY_FOLDERS = {"unet": "diffusion_models", "clip": "text_encoders"}
-# Dossiers par défaut de ComfyUI qui ne s'appellent pas simplement models/<type>.
+# ComfyUI default folders that are not simply named models/<type>.
 DEFAULT_MODEL_SUBDIRS = {"diffusion_models": ["unet", "diffusion_models"],
                          "text_encoders": ["text_encoders", "clip"],
                          "controlnet": ["controlnet", "t2i_adapter"]}
 
 
 def model_folders(paths):
-    """{type: [dossiers, dans l'ordre de ComfyUI]}. Depuis le panneau : la liste du serveur
-    lui-même ($COMFY_MODEL_FOLDERS). En ligne de commande : les dossiers par défaut complétés
-    par <ComfyUI>/extra_model_paths.yaml et $COMFY_EXTRA_MODEL_PATHS (fichiers séparés par
-    « : », comme --extra-model-paths-config), lus comme le fait ComfyUI."""
+    """{type: [folders, in ComfyUI's order]}. From the panel: the server's own list
+    ($COMFY_MODEL_FOLDERS). On the command line: the default folders, completed by
+    <ComfyUI>/extra_model_paths.yaml and $COMFY_EXTRA_MODEL_PATHS (files separated by ":", like
+    --extra-model-paths-config), read the way ComfyUI does."""
     if os.environ.get("COMFY_MODEL_FOLDERS"):
         return json.loads(os.environ["COMFY_MODEL_FOLDERS"])
     configs = [paths.comfy_home / "extra_model_paths.yaml",
@@ -177,7 +176,7 @@ def model_folders(paths):
     try:
         import yaml
     except ImportError:
-        print("!! " + t("pyyaml absent : {files} ignoré(s)", files=", ".join(map(str, configs))),
+        print("!! " + t("pyyaml not installed: {files} ignored", files=", ".join(map(str, configs))),
               file=sys.stderr)
         return folders
 
@@ -219,14 +218,14 @@ def model_folders(paths):
 # --- Config -------------------------------------------------------------------------------
 
 def seed_config():
-    """Modèle de fichier de profils : celui que fournit l'environnement (ex. une image Docker),
-    sinon l'exemple de ce dépôt."""
+    """Template profiles file: the one provided by the environment (e.g. a Docker image),
+    otherwise this repository's example."""
     return Path(os.environ.get("COMFY_PROFILES_SEED") or EXAMPLE_CONFIG)
 
 
 def config_source(arg):
-    """(fichier de profils, origine) ; origine : option (--config), env
-    (COMFY_PROFILES_CONFIG), user (<user>/__comfy_profiles) ou seed (modèle, lecture seule)."""
+    """(profiles file, origin); origin: option (--config), env (COMFY_PROFILES_CONFIG), user
+    (<user>/__comfy_profiles) or seed (template, read-only)."""
     if arg:
         return Path(arg), "option"
     if os.environ.get("COMFY_PROFILES_CONFIG"):
@@ -238,8 +237,8 @@ def config_source(arg):
 
 
 def writable_config(path, source):
-    """Où enregistrer une modification : jamais dans le modèle, mais dans le fichier de
-    l'utilisateur, qui prend alors le relais."""
+    """Where to save a change: never in the template, but in the user's file, which then takes
+    over."""
     return Paths().data / CONFIG_NAME if source == "seed" else path
 
 
@@ -253,20 +252,20 @@ def load_profiles(path, source="option"):
         if source in ("option", "env") and path != seed and seed.is_file():
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(seed, path)
-            print(">> " + t("{path} absent : copie du modèle ({seed}).", path=path, seed=seed))
+            print(">> " + t("{path} missing: copying the template ({seed}).", path=path, seed=seed))
         else:
-            sys.exit("!! " + t("Fichier de config introuvable : {path}", path=path))
+            sys.exit("!! " + t("Config file not found: {path}", path=path))
     try:
         data = json.loads(path.read_text())
     except json.JSONDecodeError as e:
-        sys.exit("!! " + t("{path} : JSON invalide ({error})", path=path, error=e))
+        sys.exit("!! " + t("{path}: invalid JSON ({error})", path=path, error=e))
     profiles = data.get("profiles")
     if not isinstance(profiles, dict) or not profiles:
-        sys.exit("!! " + t("{path} : objet 'profiles' manquant ou vide", path=path))
+        sys.exit("!! " + t("{path}: 'profiles' object missing or empty", path=path))
     for name, profile in profiles.items():
         unknown = {k for k in profile if not is_comment(k)} - PROFILE_KEYS
         if unknown:
-            sys.exit("!! " + t("Profil '{name}' : clé(s) inconnue(s) {keys} (attendues : {expected})",
+            sys.exit("!! " + t("Profile '{name}': unknown key(s) {keys} (expected: {expected})",
                                name=name, keys=sorted(unknown), expected=", ".join(sorted(PROFILE_KEYS))))
     return profiles
 
@@ -276,15 +275,15 @@ def split_names(value):
 
 
 def resolve(profiles, names):
-    """Fusionne les profils demandés et leurs `extends` (parents d'abord, chacun une fois)."""
+    """Merges the requested profiles and their `extends` (parents first, each one once)."""
     merged = {section: [] for section in SECTIONS}
     visited = set()
 
     def visit(name, stack):
         if name in stack:
-            sys.exit("!! " + t("Cycle dans 'extends' : {cycle}", cycle=" -> ".join([*stack, name])))
+            sys.exit("!! " + t("Cycle in 'extends': {cycle}", cycle=" -> ".join([*stack, name])))
         if name not in profiles:
-            sys.exit("!! " + t("Profil inconnu : '{name}' (disponibles : {available})",
+            sys.exit("!! " + t("Unknown profile: '{name}' (available: {available})",
                                name=name, available=", ".join(profiles)))
         if name in visited:
             return
@@ -301,15 +300,15 @@ def resolve(profiles, names):
     return merged
 
 
-# --- Téléchargements ----------------------------------------------------------------------
+# --- Downloads ----------------------------------------------------------------------------
 
 def source_of(item, where):
     found = [k for k in SOURCES if k in item]
     if len(found) != 1:
-        raise ConfigError(t("{where} : une (et une seule) source attendue parmi {sources}",
+        raise ConfigError(t("{where}: exactly one source expected among {sources}",
                              where=where, sources=", ".join(SOURCES)))
     if found[0] in ("hf", "github") and not item.get("file"):
-        raise ConfigError(t("{where} : 'file' (chemin dans le dépôt) requis avec '{source}'",
+        raise ConfigError(t("{where}: 'file' (path in the repository) required with '{source}'",
                              where=where, source=found[0]))
     if found[0] == "github":
         github_repo(item["github"], where)
@@ -317,33 +316,33 @@ def source_of(item, where):
 
 
 def github_repo(value, where=""):
-    """'owner/repo' à partir de 'owner/repo' ou d'une URL de dépôt GitHub."""
+    """'owner/repo' from 'owner/repo' or a GitHub repository URL."""
     repo = re.sub(r"^(https?://)?github\.com/", "", value.strip()).rstrip("/").removesuffix(".git")
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
-        raise ConfigError(t("{where} : 'github' doit être 'owner/depot' ou l'URL d'un dépôt GitHub",
+        raise ConfigError(t("{where}: 'github' must be 'owner/repo' or the URL of a GitHub repository",
                              where=where))
     return repo
 
 
 def github_file_url(item):
-    """URL d'un seul fichier du dépôt (sans le cloner). /raw/ sur github.com redirige vers
-    raw.githubusercontent.com, ou vers media.githubusercontent.com pour un fichier Git LFS."""
+    """URL of a single file of the repository (without cloning it). /raw/ on github.com redirects
+    to raw.githubusercontent.com, or to media.githubusercontent.com for a Git LFS file."""
     rev = item.get("revision") or "HEAD"
     path = urllib.parse.quote(item["file"].lstrip("/"))
     return f"https://github.com/{github_repo(item['github'])}/raw/{rev}/{path}"
 
 
 def web_repo_url(url):
-    """Page web d'un dépôt git : https://host/owner/repo pour git@host:owner/repo.git..."""
+    """Web page of a git repository: https://host/owner/repo for git@host:owner/repo.git..."""
     url = re.sub(r"^git\+", "", url.strip())
     url = re.sub(r"^[^@/:]+@([^:/]+):", r"https://\1/", url)  # git@host:owner/repo
     return url.rstrip("/").removesuffix(".git")
 
 
 def source_link(item):
-    """(site, URL de la page de la source) d'un modèle, workflow ou custom node, pour le
-    panneau : le dépôt ou le fichier sur Hugging Face ou GitHub, la version sur CivitAI, le
-    fichier sur Google Drive, ou l'URL elle-même. None si on ne sait pas en faire un lien."""
+    """(site, URL of the source page) of a model, workflow or custom node, for the panel: the
+    repository or file on Hugging Face or GitHub, the version on CivitAI, the file on Google
+    Drive, or the URL itself. None if no link can be made from it."""
     if not isinstance(item, dict):
         return None
     try:
@@ -379,7 +378,7 @@ def source_link(item):
 
 
 def pip_link(spec):
-    """(site, URL) d'un paquet pip : sa page PyPI, ou le dépôt d'une spécification git+URL."""
+    """(site, URL) of a pip package: its PyPI page, or the repository of a git+URL spec."""
     match = re.search(r"(?:git\+)?(https?://[^\s@#]+)", spec)
     if match:
         url = web_repo_url(match.group(1))
@@ -393,7 +392,7 @@ def target_name(item, where):
         return item["name"]
     if "hf" in item or "github" in item:
         return Path(item["file"]).name
-    raise ConfigError(t("{where} : 'name' (nom du fichier local) requis pour une source url/civitai",
+    raise ConfigError(t("{where}: 'name' (local file name) required for a url/civitai source",
                          where=where))
 
 
@@ -409,31 +408,31 @@ def describe_source(item):
     return item["url"]
 
 
-# Sortie partagée par les téléchargements en parallèle (voir out et Progress).
+# Output shared by the parallel downloads (see out and Progress).
 _output_lock = threading.RLock()
-# Ctrl+C pendant les téléchargements en parallèle : ceux en HTTP s'arrêtent au bloc suivant.
+# Ctrl+C during the parallel downloads: HTTP ones stop at the next block.
 CANCEL = threading.Event()
-# Fichier en cours de téléchargement dans ce thread (nom affiché par la progression Hugging Face).
+# File being downloaded in this thread (name shown by the Hugging Face progress).
 _current = threading.local()
 
 
 class Progress:
-    """Une seule ligne de progression pour tous les téléchargements en cours : pourcentage et
-    taille cumulés, débit (moyenne sur les dernières secondes), noms des fichiers. Une mise à
-    jour par seconde au plus, réécrite avec \\r : le panneau remplace alors la ligne. Plusieurs
-    barres tqdm à la fois seraient illisibles dans le panneau, et tqdm comme huggingface_hub les
-    masquent d'office sans terminal (panneau, logs du conteneur)."""
+    """A single progress line for all the running downloads: cumulative percentage and size,
+    throughput (average over the last seconds), file names. At most one update per second,
+    rewritten with \\r: the panel then replaces the line. Several tqdm bars at once would be
+    unreadable in the panel, and both tqdm and huggingface_hub hide them by default without a
+    terminal (panel, container logs)."""
 
     INTERVAL = 1.0
     WINDOW = 5.0
     NAMES_WIDTH = 80
 
     def __init__(self):
-        self.tasks = {}  # id -> [nom, octets écrits, total ou None]
+        self.tasks = {}  # id -> [name, bytes written, total or None]
         self.next_id = 0
-        self.shown = 0  # longueur de la ligne affichée, 0 si aucune
+        self.shown = 0  # length of the line shown, 0 if none
         self.last = 0.0
-        self.received = 0  # octets écrits depuis le début, tous fichiers confondus
+        self.received = 0  # bytes written since the start, all files together
         self.samples = collections.deque()  # (instant, received)
 
     def start(self, name, total=None, done=0):
@@ -459,12 +458,12 @@ class Progress:
                 self.clear()
 
     def clear(self):
-        """Efface la ligne de progression, avant d'écrire autre chose."""
+        """Clears the progress line, before writing something else."""
         if self.shown:
             sys.stdout.write("\r" + " " * self.shown + "\r")
             sys.stdout.flush()
             self.shown = 0
-            self.last = 0.0  # réaffichée dès la mise à jour suivante
+            self.last = 0.0  # shown again at the next update
 
     def render(self):
         now = time.monotonic()
@@ -479,7 +478,7 @@ class Progress:
         tasks = list(self.tasks.values())
         done = sum(task[1] for task in tasks)
         totals = [task[2] for task in tasks]
-        parts = [tasks[0][0] if len(tasks) == 1 else t("{n} fichiers", n=len(tasks))]
+        parts = [tasks[0][0] if len(tasks) == 1 else t("{n} files", n=len(tasks))]
         if all(totals):
             total = sum(totals)
             parts.append(f"{done * 100 // total}% {human_size(done)}/{human_size(total)}")
@@ -500,7 +499,7 @@ PROGRESS = Progress()
 
 
 def out(text="", err=False):
-    """print() qui efface d'abord la ligne de progression des téléchargements."""
+    """print() that first clears the downloads' progress line."""
     with _output_lock:
         PROGRESS.clear()
         print(text, file=sys.stderr if err else sys.stdout, flush=True)
@@ -516,10 +515,9 @@ class _Discard:
 
 @functools.cache
 def hub_progress_class():
-    """Classe tqdm passée à hf_hub_download : elle alimente PROGRESS au lieu d'afficher une
-    barre. Pour Xet, huggingface_hub en ouvre deux par fichier : seule compte la première
-    ouverte dans le thread, la reconstruction du fichier (octets écrits, avec le total). None
-    sans tqdm."""
+    """tqdm class passed to hf_hub_download: it feeds PROGRESS instead of showing a bar. For Xet,
+    huggingface_hub opens two per file: only the first one opened in the thread counts, the file
+    reconstruction (bytes written, with the total). None without tqdm."""
     try:
         from tqdm import tqdm
     except ImportError:
@@ -557,7 +555,7 @@ class IncompleteDownload(Exception):
 
 
 def retryable(error):
-    """Erreur passagère d'un téléchargement HTTP, qui vaut d'être reprise aussitôt."""
+    """Transient error of an HTTP download, worth resuming right away."""
     if isinstance(error, urllib.error.HTTPError):
         return error.code >= 500 or error.code == 429
     if isinstance(error, OSError) and error.errno in (errno.ENOSPC, errno.EDQUOT, errno.EACCES, errno.EROFS):
@@ -566,13 +564,13 @@ def retryable(error):
 
 
 def part_info(part):
-    """Version à la source du contenu d'un .part, notée à côté (en caché, et pas en .json :
-    le dossier des workflows liste les .json)."""
+    """Source version of the content of a .part, noted next to it (hidden, and not as .json: the
+    workflows folder lists the .json files)."""
     return part.with_name(f".{part.name}-info")
 
 
 def response_validator(headers):
-    """Valeur If-Range d'une réponse : ETag fort, sinon Last-Modified, sinon None."""
+    """If-Range value of a response: strong ETag, otherwise Last-Modified, otherwise None."""
     etag = headers.get("ETag")
     if etag and not etag.startswith("W/"):
         return etag
@@ -580,9 +578,9 @@ def response_validator(headers):
 
 
 def fetch_part(url, part, task):
-    """Une tentative de téléchargement de `url` dans `part`, à la suite de ce qu'il contient
-    déjà si le serveur accepte les requêtes partielles (Range) et que le fichier n'a pas
-    changé à la source (If-Range) ; sinon depuis le début."""
+    """One attempt at downloading `url` into `part`, after what it already holds if the server
+    accepts partial requests (Range) and the file has not changed at the source (If-Range);
+    otherwise from the start."""
     info = part_info(part)
     offset = part.stat().st_size if part.exists() else 0
     validator = info.read_text().strip() if offset and info.is_file() else None
@@ -592,7 +590,7 @@ def fetch_part(url, part, task):
     try:
         resp = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60)
     except urllib.error.HTTPError as e:
-        if e.code == 416 and offset:  # .part plus long que le fichier : on repart de zéro
+        if e.code == 416 and offset:  # .part longer than the file: start over
             part.unlink()
             return fetch_part(url, part, task)
         raise
@@ -600,7 +598,7 @@ def fetch_part(url, part, task):
         match = re.fullmatch(r"bytes (\d+)-\d+/(\d+)", resp.headers.get("Content-Range") or "")
         if resp.status == 206 and match and int(match[1]) == offset:
             mode, total = "ab", int(match[2])
-        else:  # tout le fichier : pas de reprise possible, ou il a changé à la source
+        else:  # the whole file: no resume possible, or it changed at the source
             offset, mode = 0, "wb"
             total = int(resp.headers.get("Content-Length") or 0) or None
             validator = response_validator(resp.headers)
@@ -618,13 +616,13 @@ def fetch_part(url, part, task):
                 done += len(chunk)
                 PROGRESS.update(task, done, total)
     if total and done != total:
-        raise IncompleteDownload(t("téléchargement incomplet ({done} sur {total} octets)", done=done, total=total))
+        raise IncompleteDownload(t("incomplete download ({done} of {total} bytes)", done=done, total=total))
 
 
 def fetch_url(url, dest):
-    """Télécharge `url` dans `dest`, via `dest`.part. Un .part laissé par un téléchargement
-    interrompu (arrêt, coupure, conteneur arrêté) est repris où il en était (voir fetch_part) ;
-    une coupure en cours de route est reprise aussitôt, jusqu'à HTTP_RETRIES fois."""
+    """Downloads `url` into `dest`, through `dest`.part. A .part left by an interrupted download
+    (stop, network drop, container stopped) is resumed where it stopped (see fetch_part); a drop
+    along the way is resumed right away, up to HTTP_RETRIES times."""
     part = dest.with_name(dest.name + ".part")
     task = PROGRESS.start(dest.name)
     try:
@@ -636,7 +634,7 @@ def fetch_url(url, dest):
                 if attempt == HTTP_RETRIES or not retryable(e):
                     raise
                 delay = min(2 ** attempt, 30)
-                out("   " + t("{name} : {error}, nouvel essai dans {delay} s", name=dest.name, error=e, delay=delay))
+                out("   " + t("{name}: {error}, retrying in {delay} s", name=dest.name, error=e, delay=delay))
                 if CANCEL.wait(delay):
                     raise KeyboardInterrupt
         part.replace(dest)
@@ -651,10 +649,10 @@ def fetch(item, dest, paths):
     dest.parent.mkdir(parents=True, exist_ok=True)
     _current.name, _current.busy = dest.name, False
     if "hf" in item:
-        from huggingface_hub import hf_hub_download  # lit HF_TOKEN tout seul
+        from huggingface_hub import hf_hub_download  # reads HF_TOKEN by itself
 
-        # Un dossier par fichier : plusieurs téléchargements tournent en même temps. Vidé avant
-        # (reste d'un téléchargement tué : huggingface_hub ne sait pas le reprendre) et après.
+        # One folder per file: several downloads run at the same time. Emptied before (leftover
+        # of a killed download: huggingface_hub cannot resume it) and after.
         key = hashlib.sha256(describe_source(item).encode()).hexdigest()[:12]
         work = paths.staging / f"hf-{key}"
         shutil.rmtree(work, ignore_errors=True)
@@ -675,8 +673,8 @@ def fetch(item, dest, paths):
             shutil.rmtree(work, ignore_errors=True)
     elif "civitai" in item:
         url = f"https://civitai.com/api/download/models/{item['civitai']}"
-        # Token en paramètre plutôt qu'en en-tête : CivitAI redirige vers un stockage S3 qui
-        # refuse un en-tête Authorization en plus de sa propre signature.
+        # Token as a parameter rather than a header: CivitAI redirects to an S3 storage that
+        # rejects an Authorization header on top of its own signature.
         token = os.environ.get("CIVITAI_TOKEN")
         fetch_url(f"{url}?token={token}" if token else url, dest)
     elif "github" in item:
@@ -685,13 +683,13 @@ def fetch(item, dest, paths):
         fetch_url(item["url"], dest)
 
 
-# --- Mise à jour (sync --update) ----------------------------------------------------------
+# --- Update (sync --update) ---------------------------------------------------------------
 
 class Versions:
-    """Version à la source de chaque modèle ou workflow téléchargé ou vérifié, dans
-    <user>/__comfy_profiles/versions.json. Une entrée ne vaut que tant que le fichier local n'a
-    pas changé (même taille, même date) : elle évite de recalculer l'empreinte d'un gros modèle
-    à chaque `sync --update`. Écrit depuis plusieurs téléchargements à la fois : verrouillé."""
+    """Source version of each model or workflow downloaded or checked, in
+    <user>/__comfy_profiles/versions.json. An entry only holds while the local file has not
+    changed (same size, same date): it avoids computing the checksum of a big model again at
+    each `sync --update`. Written by several downloads at once: locked."""
 
     def __init__(self, paths):
         self.file = paths.data / VERSIONS_NAME
@@ -722,9 +720,9 @@ class Versions:
 
 
 def remote_version(item):
-    """(version à la source, taille en octets ou None), sans rien télécharger : ETag Hugging
-    Face (sha256 d'un fichier LFS, sha1 de blob git sinon), ou ETag / Last-Modified HTTP.
-    None pour CivitAI : le fichier d'une version de modèle ne change jamais."""
+    """(source version, size in bytes or None), without downloading anything: Hugging Face ETag
+    (sha256 of an LFS file, git blob sha1 otherwise), or HTTP ETag / Last-Modified. None for
+    CivitAI: the file of a model version never changes."""
     if "civitai" in item:
         return None
     if "hf" in item:
@@ -740,8 +738,8 @@ def remote_version(item):
 
 
 def remember_version(item, dest, versions):
-    """Note la version à la source d'un fichier qu'on vient de télécharger (sans échec possible :
-    à défaut, la prochaine vérification comparera le fichier lui-même)."""
+    """Notes the source version of a file just downloaded (cannot fail: failing that, the next
+    check compares the file itself)."""
     try:
         remote = remote_version(item)
         if remote and remote[0]:
@@ -758,7 +756,7 @@ def file_digest(path, h):
 
 
 def hf_local_etag(path, etag):
-    """Empreinte du fichier local comparable à l'ETag Hugging Face `etag`, ou None."""
+    """Checksum of the local file comparable to the Hugging Face ETag `etag`, or None."""
     if len(etag) == 64:
         return file_digest(path, hashlib.sha256())
     if len(etag) == 40:
@@ -767,9 +765,9 @@ def hf_local_etag(path, etag):
 
 
 def refresh_file(item, dest, paths, versions):
-    """Retélécharge `dest` s'il a changé à la source. Sans version notée (fichier installé avant
-    cette version du script, ou modifié depuis), on compare le fichier lui-même : empreinte
-    pour Hugging Face, taille sinon (même taille : considéré à jour)."""
+    """Downloads `dest` again if it changed at the source. Without a noted version (file
+    installed before this version of the script, or modified since), the file itself is
+    compared: checksum for Hugging Face, size otherwise (same size: considered up to date)."""
     version, size = remote_version(item)
     known = versions.get(dest)
     if version and known == version:
@@ -777,30 +775,30 @@ def refresh_file(item, dest, paths, versions):
     elif size is not None and size != dest.stat().st_size:
         changed = True
     elif "hf" in item and version:
-        out("   " + t("calcul de l'empreinte de {name}", name=dest.name))
+        out("   " + t("computing the checksum of {name}", name=dest.name))
         changed = hf_local_etag(dest, version) not in (None, version)
     else:
         changed = bool(version and known and known != version)
     if not changed:
         if version:
             versions.set(dest, version)
-        out("   " + t("{name} : déjà à jour", name=dest.name))
+        out("   " + t("{name}: already up to date", name=dest.name))
         return
     fetch(item, dest, paths)
     if version:
         versions.set(dest, version)
-    out("   " + t("{name} : mis à jour", name=dest.name))
+    out("   " + t("{name}: updated", name=dest.name))
 
 
 def locally_modified(store):
-    """Vrai si les fichiers suivis par git d'un custom node ont été modifiés sur place."""
+    """True if the git-tracked files of a custom node were modified in place."""
     out = git(store, "status", "--porcelain", "--untracked-files=no", capture_output=True, text=True)
     return out.returncode != 0 or bool(out.stdout.strip())
 
 
 def update_git(store, ref):
-    """Amène un custom node cloné à la dernière version de `ref` (une branche ; un tag ou un
-    commit ne bougent pas), sinon de la branche par défaut du dépôt."""
+    """Brings a cloned custom node to the latest version of `ref` (a branch; a tag or a commit
+    don't move), otherwise of the repository's default branch."""
     def head():
         return git(store, "rev-parse", "--short", "HEAD", capture_output=True, text=True).stdout.strip()
 
@@ -813,11 +811,11 @@ def update_git(store, ref):
         git(store, "fetch", *depth, "origin", "HEAD", check=True)
         git(store, "reset", "--hard", "FETCH_HEAD", check=True)
     after = head()
-    print("   " + (t("déjà à jour ({rev})", rev=after) if after == before
-                   else t("mis à jour : {old} -> {new}", old=before, new=after)))
+    print("   " + (t("already up to date ({rev})", rev=after) if after == before
+                   else t("updated: {old} -> {new}", old=before, new=after)))
 
 
-# --- Dépendances Python -------------------------------------------------------------------
+# --- Python dependencies ------------------------------------------------------------------
 
 def marker(kind, key, content):
     digest = hashlib.sha256(content.encode()).hexdigest()[:12]
@@ -840,9 +838,8 @@ def touch(path):
 # --- Plan ---------------------------------------------------------------------------------
 
 class Step:
-    """`record` : (chemin, genre) à inscrire au manifeste une fois l'étape réussie. `parallel` :
-    téléchargement ou vérification d'un fichier, `name`, menés plusieurs à la fois (voir
-    run_steps)."""
+    """`record`: (path, kind) to add to the manifest once the step succeeded. `parallel`:
+    download or check of a file, `name`, run several at a time (see run_steps)."""
 
     def __init__(self, label, run, record=None, name=None, parallel=False):
         self.label = label
@@ -853,15 +850,15 @@ class Step:
 
 
 class Manifest:
-    """Ce que le gestionnaire a installé lui-même (custom nodes, modèles, workflows), dans
-    <user>/__comfy_profiles/installed.json. Seuls ces éléments sont supprimés par `uninstall`,
-    et seuls ces custom nodes changent de version quand `ref` change : un fichier ou un node déjà
-    là avant (installé à la main, livré avec ComfyUI ou une image Docker) n'est jamais touché.
+    """What the manager installed itself (custom nodes, models, workflows), in
+    <user>/__comfy_profiles/installed.json. Only these items are removed by `uninstall`, and
+    only these custom nodes change version when `ref` changes: a file or a node already there
+    before (installed by hand, shipped with ComfyUI or a Docker image) is never touched.
 
-    Sans manifeste (première utilisation de cette version), si les custom nodes sont rangés à
-    part (COMFY_PROFILES_NODES_STORE), ce qui est déjà présent pour les profils du fichier est
-    repris : ce stockage n'est rempli que par le gestionnaire, et c'était le comportement des
-    versions précédentes. Sinon, on part d'un manifeste vide."""
+    Without a manifest (first use of this version), if custom nodes are stored separately
+    (COMFY_PROFILES_NODES_STORE), what is already there for the profiles of the file is taken
+    over: that storage is only filled by the manager, and this was the behavior of the previous
+    versions. Otherwise, it starts from an empty manifest."""
 
     def __init__(self, paths, profiles):
         self.file = paths.data / MANIFEST_NAME
@@ -870,7 +867,7 @@ class Manifest:
             try:
                 self.items = json.loads(self.file.read_text()).get("items") or {}
             except (json.JSONDecodeError, AttributeError) as e:
-                sys.exit("!! " + t("{path} : JSON invalide ({error})", path=self.file, error=e))
+                sys.exit("!! " + t("{path}: invalid JSON ({error})", path=self.file, error=e))
         else:
             self.items = adopt_existing(profiles, paths) if paths.custom_nodes_store != paths.custom_nodes else {}
             self.adopted = bool(self.items)
@@ -906,12 +903,12 @@ def adopt_existing(profiles, paths):
 
 
 def file_dest(item, where, section, paths):
-    """Chemin local d'un modèle ou d'un workflow."""
+    """Local path of a model or a workflow."""
     source_of(item, where)
     if section == "workflows":
         return paths.workflows / target_name(item, where)
     if not item.get("type"):
-        raise ConfigError(t("{where} : 'type' (sous-dossier, ex: loras) requis", where=where))
+        raise ConfigError(t("{where}: 'type' (subfolder, e.g. loras) required", where=where))
     return paths.model_path(item["type"], target_name(item, where))
 
 
@@ -920,8 +917,8 @@ def file_label(item, section, dest):
 
 
 def plan_file(item, dest, kind, paths, versions, update=False, managed=False):
-    """Téléchargement d'un fichier absent ; avec `update`, vérification à la source d'un
-    fichier installé ou pris en charge par le gestionnaire (sauf CivitAI, voir remote_version)."""
+    """Download of a missing file; with `update`, check at the source of a file installed or
+    taken over by the manager (except CivitAI, see remote_version)."""
     if not dest.exists():
         def install():
             fetch(item, dest, paths)
@@ -930,20 +927,21 @@ def plan_file(item, dest, kind, paths, versions, update=False, managed=False):
         return Step(f"{describe_source(item)} -> {dest}", install, record=(dest, kind),
                     name=dest.name, parallel=True)
     if update and managed and "civitai" not in item:
-        return Step(t("{source} : vérification de {path}", source=describe_source(item), path=dest),
+        return Step(t("{source}: checking {path}", source=describe_source(item), path=dest),
                     lambda: refresh_file(item, dest, paths, versions), name=dest.name, parallel=True)
     return None
 
 
 def git(store, *args, **kwargs):
-    """git dans le dépôt du custom node `store`, jamais dans un dépôt parent : sans .git (node
-    installé depuis le Comfy Registry), git remonterait sinon jusqu'au clone de ComfyUI."""
+    """git in the repository of the custom node `store`, never in a parent repository: without
+    .git (node installed from the Comfy Registry), git would otherwise go up to the ComfyUI
+    clone."""
     env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(Path(store).absolute().parent)}
     return subprocess.run(["git", "-C", str(store), *args], env=env, **kwargs)
 
 
 def at_ref(store, ref):
-    """Vrai si le dépôt local est déjà sur `ref` (vérifié sans accès réseau)."""
+    """True if the local repository is already on `ref` (checked without network access)."""
     def rev(r):
         out = git(store, "rev-parse", "--verify", "--quiet", f"{r}^{{commit}}",
                   capture_output=True, text=True)
@@ -954,7 +952,7 @@ def at_ref(store, ref):
 
 
 def checkout_ref(store, ref):
-    """Bascule un custom node déjà cloné sur `ref` (branche, tag ou commit)."""
+    """Switches an already cloned custom node to `ref` (branch, tag or commit)."""
     shallow = git(store, "rev-parse", "--is-shallow-repository", capture_output=True, text=True)
     fetch = ["fetch", "--tags", "origin", "+refs/heads/*:refs/remotes/origin/*"]
     if shallow.stdout.strip() == "true":
@@ -967,43 +965,43 @@ def checkout_ref(store, ref):
         git(store, "checkout", ref, check=True)
 
 
-# Fichier écrit dans un custom node extrait d'un zip : id Drive dont il provient.
+# File written in a custom node extracted from a zip: Drive id it comes from.
 GDRIVE_MARKER = ".comfy-profiles-gdrive"
 
 
 def gdrive_id(value, where):
-    """Id d'un fichier Drive, à partir de l'id lui-même ou d'un lien de partage."""
+    """Id of a Drive file, from the id itself or a share link."""
     match = re.search(r"/d/([\w-]+)", value) or re.search(r"[?&]id=([\w-]+)", value)
     if match:
         return match.group(1)
     if re.fullmatch(r"[\w-]{20,}", value):
         return value
-    raise ConfigError(t("{where} : 'gdrive' doit être un lien de partage Google Drive ou un id de fichier",
+    raise ConfigError(t("{where}: 'gdrive' must be a Google Drive share link or a file id",
                          where=where))
 
 
 def extract_encrypted_zip(archive, dest, file_id):
-    """Zip chiffré (AES, ex. 7-Zip, ou ZipCrypto) : zipfile ne sait pas lire l'AES, pyzipper si."""
+    """Encrypted zip (AES, e.g. 7-Zip, or ZipCrypto): zipfile cannot read AES, pyzipper can."""
     password = os.environ.get("GDRIVE_ZIP_PASSWORD")
     if not password:
-        raise RuntimeError(t("le zip Drive {id} est chiffré : mot de passe attendu dans GDRIVE_ZIP_PASSWORD",
+        raise RuntimeError(t("Drive zip {id} is encrypted: password expected in GDRIVE_ZIP_PASSWORD",
                              id=file_id))
     try:
         import pyzipper
-    except ImportError:  # pas installé d'avance : seulement utile aux zips chiffrés
+    except ImportError:  # not installed beforehand: only needed for encrypted zips
         pip_install(["pyzipper"])
         import pyzipper
     with pyzipper.AESZipFile(archive) as zf:
         zf.setpassword(password.encode())
         try:
-            zf.extractall(dest)  # même protection des chemins que zipfile
+            zf.extractall(dest)  # same path protection as zipfile
         except RuntimeError as e:
-            raise RuntimeError(t("zip Drive {id} : déchiffrement impossible (GDRIVE_ZIP_PASSWORD erroné ?) : {error}",
+            raise RuntimeError(t("Drive zip {id}: cannot decrypt (wrong GDRIVE_ZIP_PASSWORD?): {error}",
                                  id=file_id, error=e)) from None
 
 
 def gdrive_marker(store):
-    """(id Drive, sha256 du zip ou None) dont provient un custom node, ou (None, None)."""
+    """(Drive id, zip sha256 or None) a custom node comes from, or (None, None)."""
     try:
         fields = (store / GDRIVE_MARKER).read_text().split()
     except OSError:
@@ -1012,30 +1010,30 @@ def gdrive_marker(store):
 
 
 def install_gdrive_zip(file_id, store, paths, update=False):
-    """Télécharge un zip public sur Drive et l'extrait dans `store` (remplacé s'il existe).
-    `update` : laisse `store` tel quel si le zip est celui dont il provient déjà."""
+    """Downloads a public zip from Drive and extracts it into `store` (replaced if it exists).
+    `update`: leaves `store` as is if the zip is the one it already comes from."""
     work = paths.staging / f"gdrive-{file_id}"
     archive = work / "node.zip"
     work.mkdir(parents=True, exist_ok=True)
     try:
-        # confirm=t : saute la page d'avertissement « fichier trop gros pour l'antivirus ».
+        # confirm=t: skips the "file too large for the virus scan" warning page.
         fetch_url(f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
                   archive)
         if not zipfile.is_zipfile(archive):
-            raise RuntimeError(t("le fichier Drive {id} n'est pas un zip (non public, ou quota de "
-                                 "téléchargement Drive dépassé ?)", id=file_id))
+            raise RuntimeError(t("Drive file {id} is not a zip (not public, or Drive download "
+                                 "quota exceeded?)", id=file_id))
         digest = file_digest(archive, hashlib.sha256())
         if update and gdrive_marker(store) == (file_id, digest):
-            print("   " + t("déjà à jour"))
+            print("   " + t("already up to date"))
             return
         extracted = work / "extracted"
         with zipfile.ZipFile(archive) as zf:
             encrypted = any(info.flag_bits & 0x1 for info in zf.infolist())
             if not encrypted:
-                zf.extractall(extracted)  # neutralise les chemins absolus et les `..`
+                zf.extractall(extracted)  # neutralizes absolute paths and `..`
         if encrypted:
             extract_encrypted_zip(archive, extracted, file_id)
-        # Zip d'un dossier : on prend son contenu ; sinon les fichiers sont à la racine du zip.
+        # Zip of a folder: take its content; otherwise the files are at the root of the zip.
         entries = [e for e in extracted.iterdir() if e.name != "__MACOSX"]
         root = entries[0] if len(entries) == 1 and entries[0].is_dir() else extracted
         (root / GDRIVE_MARKER).write_text(f"{file_id}\n{digest}\n")
@@ -1043,9 +1041,9 @@ def install_gdrive_zip(file_id, store, paths, update=False):
         store.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(root), str(store))
         if update:
-            print("   " + t("mis à jour"))
+            print("   " + t("updated"))
     finally:
-        # Ne reste qu'un téléchargement interrompu (node.zip.part), repris la fois suivante.
+        # Only an interrupted download is left (node.zip.part), resumed next time.
         shutil.rmtree(work / "extracted", ignore_errors=True)
         archive.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
@@ -1056,13 +1054,13 @@ def custom_node_name(item, where):
     if item.get("name"):
         return item["name"]
     if not item.get("git"):
-        raise ConfigError(t("{where} : une (et une seule) source attendue parmi {sources}",
+        raise ConfigError(t("{where}: exactly one source expected among {sources}",
                             where=where, sources="git, gdrive"))
     return item["git"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
 
 
 def normalize_repo_url(url):
-    """github.com/owner/repo pour https://github.com/Owner/Repo.git, git@github.com:owner/repo..."""
+    """github.com/owner/repo for https://github.com/Owner/Repo.git, git@github.com:owner/repo..."""
     url = re.sub(r"^(git\+)?[a-z]+://", "", url.strip().lower())
     url = re.sub(r"^[^@/]+@([^:/]+):", r"\1/", url)  # git@host:owner/repo
     url = re.sub(r"^[^@/]+@", "", url).removeprefix("www.")
@@ -1070,8 +1068,9 @@ def normalize_repo_url(url):
 
 
 def node_repo_url(path):
-    """Dépôt d'un custom node : remote origin de son propre .git (pas celui d'un dépôt parent),
-    sinon Repository de son pyproject.toml (node installé depuis le Comfy Registry, sans .git)."""
+    """Repository of a custom node: origin remote of its own .git (not that of a parent
+    repository), otherwise Repository of its pyproject.toml (node installed from the Comfy
+    Registry, without .git)."""
     git_config = path / ".git" / "config"
     if git_config.is_file():
         match = re.search(r'\[remote "origin"\][^\[]*?^\s*url\s*=\s*(\S+)',
@@ -1089,8 +1088,8 @@ def node_repo_url(path):
 
 @functools.cache
 def installed_nodes(custom_nodes):
-    """Custom nodes présents, par nom en minuscules et par dépôt (lu une fois par commande,
-    avant toute installation)."""
+    """Custom nodes present, by lowercase name and by repository (read once per command, before
+    any installation)."""
     index = {}
     if custom_nodes.is_dir():
         for entry in sorted(custom_nodes.iterdir()):
@@ -1104,9 +1103,9 @@ def installed_nodes(custom_nodes):
 
 
 def installed_elsewhere(name, item, paths):
-    """Le même custom node déjà dans custom_nodes/ sous un autre nom, par exemple installé par
-    ComfyUI-Manager depuis le Comfy Registry (comfyui-kjnodes pour ComfyUI-KJNodes) : même nom à
-    la casse près, ou même dépôt. Laissé tel quel : le cloner une 2e fois le chargerait deux fois."""
+    """The same custom node already in custom_nodes/ under another name, for instance installed
+    by ComfyUI-Manager from the Comfy Registry (comfyui-kjnodes for ComfyUI-KJNodes): same name
+    up to case, or same repository. Left as is: cloning it a 2nd time would load it twice."""
     if (paths.custom_nodes / name).exists() or (paths.custom_nodes_store / name).exists():
         return None
     index = installed_nodes(paths.custom_nodes)
@@ -1117,9 +1116,9 @@ def installed_elsewhere(name, item, paths):
 
 
 def foreign_node(name, paths):
-    """Custom node déjà dans custom_nodes/ en vrai dossier alors que le gestionnaire range les
-    siens ailleurs (COMFY_PROFILES_NODES_STORE) : livré avec une image Docker ou installé à la
-    main. Jamais touché, et ignoré dans l'état des profils."""
+    """Custom node already in custom_nodes/ as a real folder while the manager stores its own
+    elsewhere (COMFY_PROFILES_NODES_STORE): shipped with a Docker image or installed by hand.
+    Never touched, and ignored in the profiles' state."""
     link, store = paths.custom_nodes / name, paths.custom_nodes_store / name
     return link.exists() and not link.is_symlink() and link != store
 
@@ -1128,14 +1127,14 @@ def plan_custom_node(item, where, paths, manifest, update=False):
     url = item.get("git")
     drive = item.get("gdrive")
     if bool(url) == bool(drive):
-        raise ConfigError(t("{where} : une (et une seule) source attendue parmi {sources}",
+        raise ConfigError(t("{where}: exactly one source expected among {sources}",
                             where=where, sources="git, gdrive"))
     if drive:
         if not item.get("name"):
-            raise ConfigError(t("{where} : 'name' (nom du dossier du custom node) requis avec 'gdrive'",
+            raise ConfigError(t("{where}: 'name' (custom node folder name) required with 'gdrive'",
                                 where=where))
         if item.get("ref"):
-            raise ConfigError(t("{where} : 'ref' ne s'applique qu'à une source 'git'", where=where))
+            raise ConfigError(t("{where}: 'ref' only applies to a 'git' source", where=where))
         file_id = gdrive_id(drive, where)
     name = custom_node_name(item, where)
     store = paths.custom_nodes_store / name
@@ -1143,17 +1142,17 @@ def plan_custom_node(item, where, paths, manifest, update=False):
     steps = []
 
     if foreign_node(name, paths):
-        print(f"   [{name}] " + t("déjà présent ({path}), hors gestionnaire : version du profil ignorée",
+        print(f"   [{name}] " + t("already present ({path}), not managed: profile version ignored",
                                 path=link))
         return name, steps
 
     alias = installed_elsewhere(name, item, paths)
     if alias:
         if alias in manifest:
-            message = t("déjà installé sous {alias} ({path}), pris en charge : laissé tel quel",
+            message = t("already installed as {alias} ({path}), managed: left as is",
                         alias=alias.name, path=alias)
         else:
-            message = t("déjà installé sous {alias} ({path}), hors gestionnaire : laissé tel quel",
+            message = t("already installed as {alias} ({path}), not managed: left as is",
                         alias=alias.name, path=alias)
         print(f"   [{name}] {message}")
         return name, steps
@@ -1167,39 +1166,39 @@ def plan_custom_node(item, where, paths, manifest, update=False):
             steps.append(Step(t("gdrive:{id} (zip) -> {path}", id=file_id, path=store),
                               lambda: install_gdrive_zip(file_id, store, paths), record))
         elif not managed or (installed_id is None and not update):
-            print(f"   [{name}] " + t("{path} existe mais n'a pas été installé depuis Drive par le gestionnaire, "
-                                "laissé tel quel", path=store))
-        elif update:  # remplacé seulement si le zip n'est pas celui dont il provient
-            steps.append(Step(t("gdrive:{id} (zip) : mise à jour de {path}", id=file_id, path=store),
+            print(f"   [{name}] " + t("{path} exists but was not installed from Drive by the "
+                                "manager, left as is", path=store))
+        elif update:  # replaced only if the zip is not the one it comes from
+            steps.append(Step(t("gdrive:{id} (zip): updating {path}", id=file_id, path=store),
                               lambda: install_gdrive_zip(file_id, store, paths, update=True), record))
         elif installed_id != file_id:
-            steps.append(Step(t("gdrive:{id} (zip, nouveau fichier) remplace {path}", id=file_id, path=store),
+            steps.append(Step(t("gdrive:{id} (zip, new file) replaces {path}", id=file_id, path=store),
                               lambda: install_gdrive_zip(file_id, store, paths), record))
     elif update and store.exists():
         if not managed:
-            print(f"   [{name}] " + t("{path} n'a pas été installé par le gestionnaire : pas de mise à jour "
-                                "(adopt pour le prendre en charge)", path=store))
+            print(f"   [{name}] " + t("{path} was not installed by the manager: not updated (adopt "
+                                "to take it over)", path=store))
         elif not (store / ".git").exists():
-            print(f"   [{name}] " + t("{path} n'est pas un clone git (installé depuis le Comfy Registry ?) : "
-                                "pas de mise à jour, à faire avec le Manager", path=store))
+            print(f"   [{name}] " + t("{path} is not a git clone (installed from the Comfy "
+                                "Registry?): not updated, use the Manager", path=store))
         elif locally_modified(store):
-            print(f"   [{name}] " + t("{path} : fichiers modifiés sur place, pas de mise à jour", path=store))
+            print(f"   [{name}] " + t("{path}: files modified in place, not updated", path=store))
         else:
-            steps.append(Step(t("git : mise à jour de {path}{ref}", path=store,
+            steps.append(Step(t("git: updating {path}{ref}", path=store,
                                 ref=f" ({ref})" if ref else ""),
                               lambda: update_git(store, ref)))
     elif not store.exists():
         def clone():
             try:
                 git_clone()
-            except BaseException:  # échec ou interruption : un clone partiel passerait pour installé
+            except BaseException:  # failure or interruption: a partial clone would pass for installed
                 shutil.rmtree(store, ignore_errors=True)
                 raise
 
         def git_clone():
             if ref:
-                # Branche ou tag : clone superficiel. Un commit n'est pas accepté par --branch,
-                # d'où le repli sur un clone complet suivi d'un checkout.
+                # Branch or tag: shallow clone. A commit is not accepted by --branch, hence the
+                # fallback to a full clone followed by a checkout.
                 shallow = subprocess.run(
                     ["git", "clone", "--depth", "1", "--branch", ref, url, str(store)])
                 if shallow.returncode != 0:
@@ -1211,60 +1210,60 @@ def plan_custom_node(item, where, paths, manifest, update=False):
 
         steps.append(Step(f"git clone {url}{'@' + ref if ref else ''} -> {store}", clone, record))
     elif ref and not (store / ".git").exists():
-        print(f"   [{name}] " + t("{path} n'est pas un clone git (installé depuis le Comfy Registry ?) : "
-                            "ref {ref} ignorée", path=store, ref=ref))
+        print(f"   [{name}] " + t("{path} is not a git clone (installed from the Comfy Registry?): "
+                            "ref {ref} ignored", path=store, ref=ref))
     elif ref and not at_ref(store, ref):
         if managed:
-            steps.append(Step(t("git checkout {ref} dans {path}", ref=ref, path=store),
+            steps.append(Step(t("git checkout {ref} in {path}", ref=ref, path=store),
                               lambda: checkout_ref(store, ref)))
         else:
-            print(f"   [{name}] " + t("{path} n'a pas été installé par le gestionnaire : ref {ref} ignorée",
+            print(f"   [{name}] " + t("{path} was not installed by the manager: ref {ref} ignored",
                                 path=store, ref=ref))
 
     if link != store and not link.is_symlink():
         def make_link():
-            if not store.exists():  # clone ou extraction raté juste avant : pas de lien mort
-                raise RuntimeError(t("{path} absent, lien non créé", path=store))
+            if not store.exists():  # clone or extraction failed just before: no dead link
+                raise RuntimeError(t("{path} missing, link not created", path=store))
             link.parent.mkdir(parents=True, exist_ok=True)
             link.symlink_to(store)
 
-        steps.append(Step(t("lien {link} -> {path}", link=link, path=store), make_link))
+        steps.append(Step(t("link {link} -> {path}", link=link, path=store), make_link))
 
-    # Les dépendances ne sont connues qu'une fois le dépôt cloné : on les évalue à l'exécution.
+    # Dependencies are only known once the repository is cloned: they are evaluated at run time.
     def deps():
         requirements = store / "requirements.txt"
         if requirements.is_file():
             m = marker("req", name, requirements.read_text())
             if not m.exists():
-                print(f">> [{name}] " + t("installation de requirements.txt"))
+                print(f">> [{name}] " + t("installing requirements.txt"))
                 pip_install(["-r", str(requirements)])
                 touch(m)
         install_py = store / "install.py"
         if install_py.is_file():
             m = marker("install", name, install_py.read_text())
             if not m.exists():
-                print(f">> [{name}] " + t("exécution de install.py"))
+                print(f">> [{name}] " + t("running install.py"))
                 subprocess.run([sys.executable, "install.py"], cwd=store, check=True)
                 touch(m)
 
-    # Les dépendances d'un node que le gestionnaire n'a pas installé (Manager, à la main...)
-    # restent l'affaire de celui qui l'a installé.
+    # The dependencies of a node the manager did not install (Manager, by hand...) remain the
+    # business of whoever installed it.
     deps_pending = bool(steps) or managed and any(
         f.is_file() and not marker(kind, name, f.read_text()).exists()
         for kind, f in (("req", store / "requirements.txt"), ("install", store / "install.py"))
     )
     if deps_pending:
-        steps.append(Step(t("dépendances de {name} (requirements.txt / install.py)", name=name), deps))
+        steps.append(Step(t("dependencies of {name} (requirements.txt / install.py)", name=name), deps))
     return name, steps
 
 
 def build_plan(merged, paths, manifest, update=False):
-    """Retourne (étapes à exécuter, état de chaque élément : (genre, nom, à installer ?, profil
-    qui le déclare, taille déclarée en octets ou None, page de la source ou None : voir
-    source_link)). Un élément déclaré par plusieurs profils revient au premier dans l'ordre
-    de resolve(), donc au profil hérité plutôt qu'à celui qui en hérite. Valide toute la config
-    avant d'agir. `update` (sync --update) : ajoute la mise à jour de ce que le gestionnaire a
-    installé ou pris en charge (voir plan_custom_node, plan_file) et `pip install --upgrade`."""
+    """Returns (steps to run, state of each item: (kind, name, to install?, profile declaring it,
+    declared size in bytes or None, source page or None: see source_link)). An item declared by
+    several profiles goes to the first one in resolve() order, hence to the inherited profile
+    rather than the one inheriting from it. Validates the whole config before acting. `update`
+    (sync --update): adds the update of what the manager installed or took over (see
+    plan_custom_node, plan_file) and `pip install --upgrade`."""
     steps, status, seen = [], [], set()
     versions = Versions(paths)
 
@@ -1277,7 +1276,7 @@ def build_plan(merged, paths, manifest, update=False):
         steps += node_steps
         status.append(("custom_node", name, bool(node_steps), profile, None, source_link(item)))
 
-    specs = {}  # spécification -> premier profil qui la déclare
+    specs = {}  # spec -> first profile declaring it
     for profile, spec in merged["pip"]:
         specs.setdefault(spec, profile)
     missing_specs = [s for s in specs if not marker("pip", "spec", s).exists()]
@@ -1309,19 +1308,17 @@ def build_plan(merged, paths, manifest, update=False):
             if step:
                 steps.append(step)
     if unmanaged:
-        print("   " + t("{n} fichier(s) présent(s) mais non pris en charge : pas de mise à jour "
-                        "(adopt pour les prendre en charge)", n=unmanaged))
+        print("   " + t("{n} file(s) present but not managed: not updated (adopt to take them over)", n=unmanaged))
 
     return steps, status
 
 
-# --- Réglages -----------------------------------------------------------------------------
+# --- Settings -----------------------------------------------------------------------------
 
-# Réglages des téléchargements, dans <user>/__comfy_profiles/settings.json (édités par le
-# panneau) : {"downloads": {clé: valeur}}. Valeur enregistrée, sinon variable d'environnement,
-# sinon défaut.
-#   jobs                 fichiers (modèles, workflows) téléchargés à la fois
-#   hf_high_performance  Hugging Face : mode haute performance de Xet (HF_XET_HIGH_PERFORMANCE)
+# Download settings, in <user>/__comfy_profiles/settings.json (edited by the panel):
+# {"downloads": {key: value}}. Saved value, otherwise environment variable, otherwise default.
+#   jobs                 files (models, workflows) downloaded at a time
+#   hf_high_performance  Hugging Face: Xet high performance mode (HF_XET_HIGH_PERFORMANCE)
 DOWNLOAD_SETTINGS = {
     "jobs": ("COMFY_PROFILES_JOBS", 3),
     "hf_high_performance": ("HF_XET_HIGH_PERFORMANCE", True),
@@ -1330,7 +1327,7 @@ MAX_JOBS = 16
 
 
 def parse_setting(key, value):
-    """Valeur valide du réglage `key` (texte d'une variable d'environnement accepté), sinon
+    """Valid value of the setting `key` (text of an environment variable accepted), otherwise
     ConfigError."""
     if key == "jobs":
         try:
@@ -1338,12 +1335,12 @@ def parse_setting(key, value):
         except ValueError:
             jobs = None
         if jobs is None or not 1 <= jobs <= MAX_JOBS:
-            raise ConfigError(t("jobs : entier de 1 à {max} attendu", max=MAX_JOBS))
+            raise ConfigError(t("jobs: integer from 1 to {max} expected", max=MAX_JOBS))
         return jobs
     if isinstance(value, str):
         return value.strip().lower() in ("1", "true", "yes", "on")
     if not isinstance(value, bool):
-        raise ConfigError(t("{key} : true ou false attendu", key=key))
+        raise ConfigError(t("{key}: true or false expected", key=key))
     return value
 
 
@@ -1357,8 +1354,7 @@ def saved_settings(paths):
 
 
 def download_settings(paths):
-    """{clé: valeur} des réglages en vigueur ; une valeur invalide (fichier ou variable) est
-    ignorée."""
+    """{key: value} of the effective settings; an invalid value (file or variable) is ignored."""
     saved = saved_settings(paths)
     values = {}
     for key, (var, default) in DOWNLOAD_SETTINGS.items():
@@ -1371,7 +1367,7 @@ def download_settings(paths):
 
 
 def apply_download_settings(values):
-    """Avant tout import de huggingface_hub : hf_xet lit son mode au démarrage."""
+    """Before any import of huggingface_hub: hf_xet reads its mode at startup."""
     os.environ["HF_XET_HIGH_PERFORMANCE"] = "1" if values["hf_high_performance"] else "0"
 
 
@@ -1383,8 +1379,8 @@ def package_version(*names):
 
 
 def partial_downloads(paths):
-    """Téléchargements interrompus : fichiers .part (repris par la prochaine synchro, voir
-    fetch_url) et restes du dossier de staging."""
+    """Interrupted downloads: .part files (resumed by the next sync, see fetch_url) and leftovers
+    of the staging folder."""
     roots = {paths.models, paths.workflows,
              *(Path(folder) for folders in paths.model_folders.values() for folder in folders)}
     found = set()
@@ -1405,11 +1401,11 @@ def cmd_settings(args):
         try:
             changes = json.loads(args.set)
             if not isinstance(changes, dict):
-                raise ConfigError(t("objet JSON attendu"))
+                raise ConfigError(t("JSON object expected"))
             saved = saved_settings(paths)
             for key, value in changes.items():
                 if key not in DOWNLOAD_SETTINGS:
-                    raise ConfigError(t("réglage inconnu : {key}", key=key))
+                    raise ConfigError(t("unknown setting: {key}", key=key))
                 if value is None:
                     saved.pop(key, None)
                 else:
@@ -1446,22 +1442,22 @@ def cmd_settings(args):
     })
 
 
-# --- Commandes ----------------------------------------------------------------------------
+# --- Commands -----------------------------------------------------------------------------
 
 def print_json(data):
     print(json.dumps(data, ensure_ascii=False))
 
 
 def profile_state(profiles, name, paths, memo=None):
-    """installed : tout est là, extends compris. Sinon, l'état dépend des éléments propres au
-    profil (ceux qu'il n'hérite pas déjà d'un parent) : partial si l'un d'eux est présent,
-    missing sinon. Un parent installé (ex. comfyui-common, partagé par beaucoup) ne rend donc
-    pas « partiels » les profils qui en héritent. Un profil sans élément propre, qui ne fait
-    que regrouper d'autres profils (ex. minimax-h3-all-*), est jugé sur les éléments de ses
-    parents hors de la base qu'ils ont tous en commun (ex. minimax-h3-common-*) : il est ainsi
-    cohérent avec chacun d'eux. À défaut (un seul parent), il reprend l'état de ses parents
-    directs : partial si l'un d'eux est installé ou partiel. empty : n'installe aucun fichier (pip seul, ou seulement
-    des custom nodes hors gestionnaire, voir foreign_node). error : config invalide."""
+    """installed: everything is there, extends included. Otherwise, the state depends on the
+    profile's own items (those it does not already inherit from a parent): partial if one of
+    them is present, missing otherwise. An installed parent (e.g. comfyui-common, shared by
+    many) therefore does not make the profiles inheriting from it "partial". A profile without
+    items of its own, which only groups other profiles (e.g. minimax-h3-all-*), is judged on the
+    items of its parents outside the base they all share (e.g. minimax-h3-common-*): it is thus
+    consistent with each of them. Failing that (a single parent), it takes the state of its
+    direct parents: partial if one of them is installed or partial. empty: installs no file (pip
+    only, or only custom nodes outside the manager, see foreign_node). error: invalid config."""
     memo = {} if memo is None else memo
     if name in memo:
         return memo[name]
@@ -1493,9 +1489,9 @@ def profile_state(profiles, name, paths, memo=None):
 
 
 def profile_total(profiles, name, paths=None):
-    """(total en octets des fichiers, nb de fichiers de taille inconnue), extends compris,
-    chaque fichier compté une fois. Les custom nodes et paquets pip ne comptent pas. Avec
-    `paths`, seulement les fichiers absents : ce qu'ajouterait l'installation du profil."""
+    """(total size of the files in bytes, number of files of unknown size), extends included,
+    each file counted once. Custom nodes and pip packages don't count. With `paths`, only the
+    missing files: what installing the profile would add."""
     merged = resolve(profiles, [name])
     total, unknown, seen = 0, 0, set()
     for section in ("models", "workflows"):
@@ -1516,8 +1512,8 @@ def profile_total(profiles, name, paths=None):
 
 
 def profile_items(profiles, name):
-    """Noms des éléments d'un profil, extends compris, chacun une fois (pour le filtre du
-    panneau) : custom nodes, paquets pip, « type/fichier » des modèles et workflows."""
+    """Names of a profile's items, extends included, each one once (for the panel's filter):
+    custom nodes, pip packages, "type/file" of models and workflows."""
     try:
         merged = resolve(profiles, [name])
         names = [custom_node_name(item, f"[{profile}] custom_nodes")
@@ -1552,9 +1548,9 @@ def config_location(arg):
 
 
 def unmanaged_items(profiles, names, paths, manifest):
-    """Éléments présents pour ces profils (extends compris) que le gestionnaire n'a pas installés
-    lui-même : {chemin: (genre, nom, lien)}. `uninstall` les laisse en place ; `adopt` les prend
-    en charge."""
+    """Items present for these profiles (extends included) that the manager did not install
+    itself: {path: (kind, name, link)}. `uninstall` leaves them in place; `adopt` takes them
+    over."""
     targets = installed_by(resolve(profiles, names), paths)
     return {path: target for path, target in targets.items()
             if present(path, target[2]) and path not in manifest}
@@ -1578,10 +1574,10 @@ def cmd_list(profiles, args):
                 name: {
                     "description": profile.get("description", ""),
                     "size": profile.get("size", ""),
-                    # Total calculé à partir des tailles des fichiers, pour l'afficher dans la
-                    # langue du panneau ; "size" est le texte écrit par profile_sizes.py.
+                    # Total computed from the file sizes, to show it in the panel's language;
+                    # "size" is the text written by profile_sizes.py.
                     **dict(zip(("total", "unknown"), safe_total(profiles, name))),
-                    # Part de ce total que l'installation du profil ajouterait (fichiers absents).
+                    # Share of this total that installing the profile would add (missing files).
                     **dict(zip(("todo", "todo_unknown"), safe_total(profiles, name, paths))),
                     "extends": profile.get("extends", []),
                     "items": profile_items(profiles, name),
@@ -1599,20 +1595,19 @@ def cmd_list(profiles, args):
         suffix = f"  (extends: {', '.join(extends)})" if extends else ""
         print(f"- {name}{suffix}")
         if profile.get("size"):
-            print("    " + t("taille : {size}", size=profile["size"]))
+            print("    " + t("size: {size}", size=profile["size"]))
         if profile.get("description"):
             print(f"    {profile['description']}")
         if counts:
-            print("    " + t("propre : {counts}", counts=counts))
+            print("    " + t("own: {counts}", counts=counts))
 
 
 def cmd_show(profiles, args):
     names = split_names(args.profiles)
     if not names:
-        sys.exit("!! " + t("Indique au moins un profil (voir `list`)"))
+        sys.exit("!! " + t("Give at least one profile (see `list`)"))
     try:
-        # Les messages de build_plan (custom nodes laissés tels quels...) ne doivent pas
-        # polluer le JSON.
+        # build_plan's messages (custom nodes left as is...) must not pollute the JSON.
         with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
             paths = Paths()
             manifest = Manifest(paths, profiles)
@@ -1620,8 +1615,8 @@ def cmd_show(profiles, args):
             unmanaged = {(kind, label) for kind, label, _ in unmanaged_items(profiles, names, paths, manifest).values()}
     except ConfigError as e:
         sys.exit(f"!! {e}")
-    # Regroupés par profil qui les déclare : ceux demandés d'abord, puis les profils hérités
-    # dans l'ordre de resolve() (parents avant enfants).
+    # Grouped by the profile declaring them: the requested ones first, then the inherited
+    # profiles in resolve() order (parents before children).
     order = list(dict.fromkeys([*names, *(st[3] for st in status)]))
     status = sorted(status, key=lambda st: order.index(st[3]))
     if args.json:
@@ -1634,22 +1629,21 @@ def cmd_show(profiles, args):
     for kind, name, missing, profile, size, _ in status:
         if profile != current:
             current = profile
-            lines.append(f"[{profile}]" + ("" if profile in names else " " + t("(hérité)")))
-        todo = t("à télécharger") if kind in ("model", "workflow") else t("à installer")
-        state = (todo if missing else t("présent, non pris en charge") if (kind, name) in unmanaged
-                 else t("présent"))
+            lines.append(f"[{profile}]" + ("" if profile in names else " " + t("(inherited)")))
+        todo = t("to download") if kind in ("model", "workflow") else t("to install")
+        state = (todo if missing else t("present, not managed") if (kind, name) in unmanaged
+                 else t("present"))
         shown = (human_size(size) if size is not None else "?") if kind in ("model", "workflow") else ""
         lines.append(f"  {kind:<12} {name:<40} {shown:>9}  {state}")
-    print("\n".join(lines) or t("(profil vide)"))
+    print("\n".join(lines) or t("(empty profile)"))
 
 
 def run_steps(steps, manifest, jobs, finished):
-    """Exécute le plan : d'abord, une à une, les étapes qui ne sont pas des téléchargements
-    (custom nodes, pip : leur sortie, celle de git et de pip, ne se mélange pas), puis les
-    téléchargements et vérifications de fichiers, `jobs` à la fois. Une étape ratée ne bloque
-    pas les suivantes. `finished` reçoit les étapes terminées ; renvoie les libellés de celles
-    ratées. Ctrl+C pendant les téléchargements : ceux en HTTP s'arrêtent (CANCEL), on attend
-    un peu, puis KeyboardInterrupt."""
+    """Runs the plan: first, one by one, the steps that are not downloads (custom nodes, pip:
+    their output, that of git and pip, must not get mixed), then the file downloads and checks,
+    `jobs` at a time. A failed step does not block the following ones. `finished` receives the
+    completed steps; returns the labels of the failed ones. Ctrl+C during the downloads: HTTP
+    ones stop (CANCEL), waits a little, then KeyboardInterrupt."""
     total = len(steps)
     numbered = list(enumerate(steps, 1))
     failures = []
@@ -1657,7 +1651,7 @@ def run_steps(steps, manifest, jobs, finished):
     def done(i, step, error):
         finished.append(step)
         if error is not None:
-            out(f"!! ({i}/{total}) " + t("Échec : {error}", error=error), err=True)
+            out(f"!! ({i}/{total}) " + t("Failed: {error}", error=error), err=True)
             failures.append(step.label)
         elif step.record:
             manifest.add(*step.record)
@@ -1684,11 +1678,11 @@ def run_steps(steps, manifest, jobs, finished):
             i, step = futures[future]
             done(i, step, future.exception())
             if future.exception() is None and jobs > 1 and len(downloads) > 1:
-                out(f">> ({i}/{total}) " + t("terminé : {name}", name=step.name))
+                out(f">> ({i}/{total}) " + t("done: {name}", name=step.name))
     except KeyboardInterrupt:
         CANCEL.set()
         pool.shutdown(wait=False, cancel_futures=True)
-        # Seulement ceux qui tournaient : wait() ne voit jamais finir un futur annulé ainsi.
+        # Only the running ones: wait() never sees a future cancelled this way finish.
         concurrent.futures.wait([f for f in futures if not f.cancelled()], timeout=5)
         raise
     pool.shutdown()
@@ -1698,20 +1692,20 @@ def run_steps(steps, manifest, jobs, finished):
 def cmd_sync(profiles, args):
     names = split_names(args.profiles or os.environ.get("COMFY_PROFILES"))
     if not names:
-        print(">> " + t("Aucun profil demandé (argument ou COMFY_PROFILES), rien à faire."))
+        print(">> " + t("No profile requested (argument or COMFY_PROFILES), nothing to do."))
         return 0
     paths = Paths()
     manifest = Manifest(paths, profiles)
     if args.update:
-        print(">> " + t("Mise à jour : ce que le gestionnaire a installé ou pris en charge est "
-                        "comparé à sa source."))
+        print(">> " + t("Update: what the manager installed or took over is compared with its "
+                        "source."))
     try:
         steps, _ = build_plan(resolve(profiles, names), paths, manifest, args.update)
     except ConfigError as e:
         sys.exit(f"!! {e}")
 
-    print(">> " + t("Profils : {names} — {n} action(s) à faire", names=", ".join(names), n=len(steps)))
-    print(">> " + t("Modèles -> {path}", path=paths.models))
+    print(">> " + t("Profiles: {names} — {n} action(s) to do", names=", ".join(names), n=len(steps)))
+    print(">> " + t("Models -> {path}", path=paths.models))
     if not steps:
         return 0
     if args.dry_run:
@@ -1720,57 +1714,57 @@ def cmd_sync(profiles, args):
         return 0
     if manifest.adopted:
         manifest.save()
-        print(">> " + t("{path} créé : {n} élément(s) déjà présent(s) repris.",
+        print(">> " + t("{path} created: {n} item(s) already present taken over.",
                         path=manifest.file, n=len(manifest.items)))
-    print(">> " + (t("HF_TOKEN détecté.") if os.environ.get("HF_TOKEN")
-                   else t("Pas de HF_TOKEN : téléchargements HF anonymes.")))
+    print(">> " + (t("HF_TOKEN found.") if os.environ.get("HF_TOKEN")
+                   else t("No HF_TOKEN: anonymous HF downloads.")))
     settings = download_settings(paths)
     apply_download_settings(settings)
     jobs = args.jobs or settings["jobs"]
     if any(step.parallel for step in steps):
-        print(">> " + t("Téléchargements : {n} à la fois", n=jobs) +
-              (", " + t("Hugging Face en mode haute performance") if settings["hf_high_performance"] else ""),
+        print(">> " + t("Downloads: {n} at a time", n=jobs) +
+              (", " + t("Hugging Face in high performance mode") if settings["hf_high_performance"] else ""),
               flush=True)
 
     finished = []
     try:
         failures = run_steps(steps, manifest, jobs, finished)
     except KeyboardInterrupt:
-        out("!! " + t("Synchronisation interrompue ({done}/{total} action(s) faite(s)).",
+        out("!! " + t("Sync interrupted ({done}/{total} action(s) done).",
                       done=len(finished), total=len(steps)), err=True)
         if not CANCEL.is_set():
             return 130
-        # Un téléchargement Hugging Face ne s'interrompt pas de l'extérieur : on quitte sans
-        # attendre les threads qui le mènent.
+        # A Hugging Face download cannot be interrupted from outside: exit without waiting for
+        # the threads running it.
         os._exit(130)
 
     if failures:
-        print("!! " + t("{n} échec(s) sur {total} :", n=len(failures), total=len(steps)), file=sys.stderr)
+        print("!! " + t("{n} failure(s) out of {total}:", n=len(failures), total=len(steps)), file=sys.stderr)
         for label in failures:
             print(f"   - {label}", file=sys.stderr)
         return 1
-    print(">> " + t("Synchronisation terminée."))
+    print(">> " + t("Sync complete."))
     return 0
 
 
-# --- Prise en charge ----------------------------------------------------------------------
+# --- Take over ----------------------------------------------------------------------------
 
 def mark_deps_installed(name, store):
-    """Le node fonctionnait déjà : ses dépendances (requirements.txt, install.py) sont notées
-    comme installées dans ce venv, sans quoi sync voudrait les réinstaller."""
+    """The node already worked: its dependencies (requirements.txt, install.py) are noted as
+    installed in this venv, otherwise sync would want to install them again."""
     for kind, f in (("req", store / "requirements.txt"), ("install", store / "install.py")):
         if f.is_file():
             touch(marker(kind, name, f.read_text()))
 
 
 def cmd_adopt(profiles, args):
-    """Inscrit au manifeste ce qui est déjà présent pour des profils (extends compris) sans
-    avoir été installé par le gestionnaire : `uninstall` pourra ensuite le supprimer, et `sync`
-    changer la version (ref) de ses custom nodes. Les custom nodes livrés avec une image
-    (foreign_node) restent exclus."""
+    """Adds to the manifest what is already present for some profiles (extends included)
+    without having been installed by the manager: `uninstall` can then remove it, and `sync`
+    change the version (ref) of its custom nodes. Custom nodes shipped with an image
+    (foreign_node) stay excluded."""
     names = split_names(args.profiles)
     if not names:
-        sys.exit("!! " + t("Indique au moins un profil (voir `list`)"))
+        sys.exit("!! " + t("Give at least one profile (see `list`)"))
     paths = Paths()
     manifest = Manifest(paths, profiles)
     try:
@@ -1788,28 +1782,28 @@ def cmd_adopt(profiles, args):
                     "dry_run": args.dry_run})
         return 0
     if args.dry_run:
-        print(">> " + t("{names} : {n} élément(s) seraient pris en charge", names=", ".join(names), n=len(items)))
+        print(">> " + t("{names}: {n} item(s) would be taken over", names=", ".join(names), n=len(items)))
     else:
-        print(">> " + t("{names} : {n} élément(s) pris en charge", names=", ".join(names), n=len(items)))
+        print(">> " + t("{names}: {n} item(s) taken over", names=", ".join(names), n=len(items)))
     for kind, label, _ in items.values():
         print(f"   {'[dry-run] ' if args.dry_run else ''}{kind:<12} {label}")
     if items and not args.dry_run:
-        print(">> " + t("La désinstallation de ces profils pourra désormais les supprimer."))
+        print(">> " + t("Uninstalling these profiles can now remove them."))
     return 0
 
 
-# --- Désinstallation ----------------------------------------------------------------------
+# --- Uninstall ----------------------------------------------------------------------------
 
 def installed_by(merged, paths):
-    """Ce qu'installent des profils : {chemin: (genre, nom, lien du custom node ou None)}.
-    Les custom nodes hors gestionnaire (foreign_node) n'en font pas partie."""
+    """What some profiles install: {path: (kind, name, custom node link or None)}. Custom nodes
+    outside the manager (foreign_node) are not part of it."""
     targets = {}
     for profile, item in merged["custom_nodes"]:
         name = custom_node_name(item, f"[{profile}] custom_nodes")
         if foreign_node(name, paths):
             continue
         alias = installed_elsewhere(name, item, paths)
-        if alias:  # jamais dans le manifeste : compte comme présent, jamais supprimé
+        if alias:  # never in the manifest: counts as present, never removed
             targets.setdefault(alias, ("custom_node", name, None))
         else:
             targets.setdefault(paths.custom_nodes_store / name,
@@ -1822,17 +1816,17 @@ def installed_by(merged, paths):
 
 
 def present(path, link):
-    """Quelque chose à supprimer (même un custom node à moitié en place)."""
+    """Something to remove (even a custom node half in place)."""
     return path.exists() or (link is not None and link.is_symlink())
 
 
 def installed(path, link):
-    """Réellement utilisable : pour un custom node, le dossier et son lien dans ComfyUI."""
+    """Actually usable: for a custom node, the folder and its link in ComfyUI."""
     return path.exists() and (link is None or link.exists())
 
 
 def ancestors(profiles, names):
-    """Les profils et tout ce dont ils héritent (extends)."""
+    """The profiles and everything they inherit from (extends)."""
     found = set()
 
     def visit(name):
@@ -1859,33 +1853,32 @@ def remove(path, link, paths):
         shutil.rmtree(path)
     else:
         path.unlink(missing_ok=True)
-    # Sous-dossiers de modèles devenus vides (ex. diffusion_models/krea2).
+    # Model subfolders that became empty (e.g. diffusion_models/krea2).
     roots = paths.model_roots()
     parent = path.parent
     while (parent not in roots and parent.parent not in roots and roots & set(parent.parents)
-           and not any(parent.iterdir())):  # models/<type>/ reste, même vide
+           and not any(parent.iterdir())):  # models/<type>/ stays, even empty
         parent.rmdir()
         parent = parent.parent
 
 
 def own_items(profiles, names):
-    """Comme resolve(), mais seulement les éléments écrits dans les profils eux-mêmes, sans
-    ceux dont ils héritent (extends)."""
-    resolve(profiles, names)  # valide les noms et les extends
+    """Like resolve(), but only the items written in the profiles themselves, without those they
+    inherit from (extends)."""
+    resolve(profiles, names)  # validates the names and the extends
     return {section: [(name, item) for name in names for item in profiles[name].get(section, [])]
             for section in SECTIONS}
 
 
 def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
-    """Ce que supprime la désinstallation de `names`. Un élément est conservé s'il sert encore à
-    un profil qu'on garde : un profil de COMFY_PROFILES (réinstallé à chaque démarrage), ou un
-    autre profil complètement installé. Ce que le gestionnaire n'a pas installé (absent du
-    manifeste) reste.
+    """What uninstalling `names` removes. An item is kept if it is still used by a profile that
+    stays: a profile of COMFY_PROFILES (reinstalled at each startup), or another fully installed
+    profile. What the manager did not install (missing from the manifest) stays.
 
-    Par défaut, seuls les éléments propres à `names` partent : les profils dont ils héritent
-    (extends) sont des profils gardés comme les autres. Avec `with_extends`, ces profils
-    hérités sont désinstallés aussi (ils ne protègent donc rien) : leurs éléments partent,
-    sauf s'ils servent à un autre profil gardé."""
+    By default, only the items of `names` themselves go: the profiles they inherit from
+    (extends) are kept profiles like the others. With `with_extends`, these inherited profiles
+    are uninstalled too (so they protect nothing): their items go, unless another kept profile
+    uses them."""
     startup = split_names(os.environ.get("COMFY_PROFILES"))
     if with_extends:
         inherited = ancestors(profiles, names)
@@ -1902,7 +1895,7 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
         if theirs and all(installed(path, link) for path, (_, _, link) in theirs.items()):
             keep.append(name)
 
-    needed = {}  # chemin -> profils gardés qui l'utilisent
+    needed = {}  # path -> kept profiles using it
     for name in keep:
         for path in installed_by(resolve(profiles, [name]), paths):
             needed.setdefault(path, []).append(name)
@@ -1922,11 +1915,11 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
         "remove": removed,
         "kept": kept,
         "unmanaged": unmanaged,
-        # Seulement ceux qui protègent effectivement quelque chose.
+        # Only those actually protecting something.
         "keep_profiles": [n for n in keep if any(n in k["by"] for k in kept)],
         "startup": [n for n in names if n in startup],
         "with_extends": with_extends,
-        # Profils dont héritent ceux qu'on désinstalle : laissés en place sans with_extends.
+        # Profiles inherited by the uninstalled ones: left in place without with_extends.
         "extends": sorted(ancestors(profiles, names) - set(names)),
     }
 
@@ -1934,7 +1927,7 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
 def cmd_uninstall(profiles, args):
     names = split_names(args.profiles)
     if not names:
-        sys.exit("!! " + t("Indique au moins un profil (voir `list`)"))
+        sys.exit("!! " + t("Give at least one profile (see `list`)"))
     paths = Paths()
     manifest = Manifest(paths, profiles)
     try:
@@ -1954,24 +1947,24 @@ def cmd_uninstall(profiles, args):
 
     values = {"names": ", ".join(names), "n": len(removed), "size": human_size(freed)}
     if args.with_extends:
-        print(">> " + t("Désinstallation : {names} (extends compris) — {n} élément(s), {size}", **values))
+        print(">> " + t("Uninstall: {names} (including extends) — {n} item(s), {size}", **values))
     else:
-        print(">> " + t("Désinstallation : {names} — {n} élément(s), {size}", **values))
+        print(">> " + t("Uninstall: {names} — {n} item(s), {size}", **values))
     if plan["extends"] and not args.with_extends:
-        print(">> " + t("Profils hérités laissés en place : {names} (--with-extends pour les inclure)",
+        print(">> " + t("Inherited profiles left in place: {names} (--with-extends to include them)",
                         names=", ".join(plan["extends"])))
     if plan["keep_profiles"]:
-        print(">> " + t("Profils gardés (leurs éléments ne sont pas supprimés) : {names}",
+        print(">> " + t("Kept profiles (their items are not removed): {names}",
                         names=", ".join(plan["keep_profiles"])))
-    kept = t("conservé")
+    kept = t("kept")
     for k in plan["kept"]:
-        print(f"   {kept}  {k['kind']:<12} {k['name']}  " + t("(utilisé par {names})", names=", ".join(k["by"])))
+        print(f"   {kept}  {k['kind']:<12} {k['name']}  " + t("(used by {names})", names=", ".join(k["by"])))
     for u in plan["unmanaged"]:
-        print(f"   {kept}  {u['kind']:<12} {u['name']}  " + t("(pas installé par le gestionnaire)"))
+        print(f"   {kept}  {u['kind']:<12} {u['name']}  " + t("(not installed by the manager)"))
     for name in plan["startup"]:
-        print("!! " + t("{name} est dans COMFY_PROFILES : il sera réinstallé au prochain démarrage.", name=name))
+        print("!! " + t("{name} is in COMFY_PROFILES: it will be reinstalled at the next startup.", name=name))
     if not removed:
-        print(">> " + t("Rien à supprimer."))
+        print(">> " + t("Nothing to remove."))
         return 0
     if manifest.adopted and not args.dry_run:
         manifest.save()
@@ -1979,26 +1972,26 @@ def cmd_uninstall(profiles, args):
     for i, r in enumerate(removed, 1):
         label = f"{r['kind']:<12} {r['name']}  ({human_size(r['size'])})"
         if args.dry_run:
-            print("   [dry-run] " + t("supprimer {item}", item=label))
+            print("   [dry-run] " + t("remove {item}", item=label))
             continue
-        print(f">> ({i}/{len(removed)}) " + t("supprimer {item}", item=label), flush=True)
+        print(f">> ({i}/{len(removed)}) " + t("remove {item}", item=label), flush=True)
         try:
             remove(r["path"], r["link"], paths)
             manifest.discard(r["path"])
             manifest.save()
         except KeyboardInterrupt:
-            print("!! " + t("Désinstallation interrompue ({done}/{total} supprimé(s)).",
+            print("!! " + t("Uninstall interrupted ({done}/{total} removed).",
                             done=i - 1, total=len(removed)), file=sys.stderr)
             return 130
         except OSError as e:
-            print("!! " + t("Échec : {error}", error=e), file=sys.stderr)
+            print("!! " + t("Failed: {error}", error=e), file=sys.stderr)
             return 1
     if args.dry_run:
         return 0
-    print(">> " + t("Désinstallation terminée : {size} libérés.", size=human_size(freed)))
+    print(">> " + t("Uninstall complete: {size} freed.", size=human_size(freed)))
     if any(r["kind"] == "custom_node" for r in removed):
-        print(">> " + t("Des custom nodes ont été supprimés : redémarre ComfyUI pour les décharger."))
-    print(">> " + t("Les paquets pip installés pour ces profils restent dans le venv."))
+        print(">> " + t("Custom nodes were removed: restart ComfyUI to unload them."))
+    print(">> " + t("The pip packages installed for these profiles stay in the venv."))
     return 0
 
 
@@ -2007,41 +2000,42 @@ def main():
         description=doc(__doc__, "comfy_profiles"),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", help=t("fichier de profils (défaut : $COMFY_PROFILES_CONFIG, "
-                                           "<user>/__comfy_profiles/profiles.json, sinon le modèle)"))
+    parser.add_argument("--config", help=t("profiles file (default: $COMFY_PROFILES_CONFIG, "
+                                           "<user>/__comfy_profiles/profiles.json, otherwise the "
+                                           "template)"))
     sub = parser.add_subparsers(dest="command", required=True)
-    lst = sub.add_parser("list", help=t("liste les profils disponibles"))
-    lst.add_argument("--json", action="store_true", help=t("sortie JSON"))
-    sub.add_parser("where", help=t("fichier de profils utilisé, son origine et où l'enregistrer (JSON, sans le lire)"))
-    show = sub.add_parser("show", help=t("détaille ce qu'installent des profils, et ce qui est déjà là"))
+    lst = sub.add_parser("list", help=t("list the available profiles"))
+    lst.add_argument("--json", action="store_true", help=t("JSON output"))
+    sub.add_parser("where", help=t("profiles file in use, where it comes from and where to save it (JSON, without reading it)"))
+    show = sub.add_parser("show", help=t("detail what profiles install, and what is already there"))
     show.add_argument("profiles")
-    show.add_argument("--json", action="store_true", help=t("sortie JSON"))
-    sync = sub.add_parser("sync", help=t("installe ce qui manque pour des profils"))
-    sync.add_argument("profiles", nargs="?", help=t("défaut : $COMFY_PROFILES"))
-    sync.add_argument("--dry-run", action="store_true", help=t("affiche les actions sans rien faire"))
+    show.add_argument("--json", action="store_true", help=t("JSON output"))
+    sync = sub.add_parser("sync", help=t("install what profiles are missing"))
+    sync.add_argument("profiles", nargs="?", help=t("default: $COMFY_PROFILES"))
+    sync.add_argument("--dry-run", action="store_true", help=t("show the actions without doing anything"))
     sync.add_argument("--update", action="store_true",
-                      help=t("met aussi à jour ce que le gestionnaire a installé ou pris en charge, "
-                             "s'il a changé à la source"))
+                      help=t("also updates what the manager installed or took over, if it changed "
+                             "at the source"))
     sync.add_argument("--jobs", type=int, choices=range(1, MAX_JOBS + 1), metavar="N",
-                      help=t("fichiers téléchargés à la fois (défaut : réglage jobs, voir settings)"))
-    adopt = sub.add_parser("adopt", help=t("prend en charge ce qui est déjà présent pour des profils "
-                                           "(uninstall pourra le supprimer)"))
+                      help=t("files downloaded at a time (default: jobs setting, see settings)"))
+    adopt = sub.add_parser("adopt", help=t("take over what is already present for profiles "
+                                           "(uninstall can then remove it)"))
     adopt.add_argument("profiles")
-    adopt.add_argument("--dry-run", action="store_true", help=t("affiche ce qui serait pris en charge"))
-    adopt.add_argument("--json", action="store_true", help=t("sortie JSON"))
-    uninstall = sub.add_parser("uninstall", help=t("supprime ce qu'ont installé des profils (sauf ce qui sert encore)"))
+    adopt.add_argument("--dry-run", action="store_true", help=t("show what would be taken over"))
+    adopt.add_argument("--json", action="store_true", help=t("JSON output"))
+    uninstall = sub.add_parser("uninstall", help=t("remove what profiles installed (except what is still in use)"))
     uninstall.add_argument("profiles")
-    uninstall.add_argument("--dry-run", action="store_true", help=t("affiche ce qui serait supprimé"))
+    uninstall.add_argument("--dry-run", action="store_true", help=t("show what would be removed"))
     uninstall.add_argument("--with-extends", action="store_true",
-                           help=t("désinstalle aussi les profils dont ils héritent (extends)"))
-    uninstall.add_argument("--json", action="store_true", help=t("sortie JSON (implique --dry-run)"))
-    settings = sub.add_parser("settings", help=t("réglages des téléchargements et téléchargements partiels (JSON)"))
+                           help=t("also uninstall the profiles they inherit from (extends)"))
+    uninstall.add_argument("--json", action="store_true", help=t("JSON output (implies --dry-run)"))
+    settings = sub.add_parser("settings", help=t("download settings and partial downloads (JSON)"))
     settings.add_argument("--set", metavar="JSON",
-                          help=t("réglages à enregistrer, ex. '{\"jobs\": 4}' (null : revient au défaut)"))
-    settings.add_argument("--reset", action="store_true", help=t("revient aux réglages par défaut"))
+                          help=t("settings to save, e.g. '{\"jobs\": 4}' (null: back to the default)"))
+    settings.add_argument("--reset", action="store_true", help=t("back to the default settings"))
     settings.add_argument("--clean-partials", action="store_true",
-                          help=t("supprime les téléchargements partiels (pas pendant une synchro)"))
-    settings.add_argument("--json", action="store_true", help=t("sortie JSON (toujours)"))
+                          help=t("deletes partial downloads (not during a sync)"))
+    settings.add_argument("--json", action="store_true", help=t("JSON output (always)"))
     args = parser.parse_args()
     if args.command == "where":
         print_json(config_location(args.config))
@@ -2052,8 +2046,8 @@ def main():
 
     path, source = config_source(args.config)
     as_json = getattr(args, "json", False)
-    note = " " + t("(modèle, lecture seule)") if source == "seed" else ""
-    print(">> " + t("Config : {path}", path=path) + note, file=sys.stderr if as_json else sys.stdout)
+    note = " " + t("(template, read-only)") if source == "seed" else ""
+    print(">> " + t("Config: {path}", path=path) + note, file=sys.stderr if as_json else sys.stdout)
     with contextlib.redirect_stdout(sys.stderr if as_json else sys.stdout):
         profiles = load_profiles(path, source)
     commands = {"list": cmd_list, "show": cmd_show, "sync": cmd_sync, "uninstall": cmd_uninstall,

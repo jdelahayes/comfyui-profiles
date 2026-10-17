@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/jdelahayes/comfyui-profiles/main/profiles.schema.json",
   "profiles": {
     "essential-nodes": {
-      "description": "Custom nodes d'usage courant (rgthree, KJNodes).",
+      "description": "Commonly used custom nodes (rgthree, KJNodes).",
       "custom_nodes": [
         {"git": "https://github.com/rgthree/rgthree-comfy.git"},
         {"git": "https://github.com/kijai/ComfyUI-KJNodes.git"}
@@ -10,8 +10,8 @@
     },
 
     "taesd-previews": {
-      "description": "Aperçus rapides pendant la génération (TAESD), SD 1.5 et SDXL : lancer ComfyUI avec --preview-method taesd.",
-      "size": "19,6 Mo",
+      "description": "Fast previews during generation (TAESD), SD 1.5 and SDXL: start ComfyUI with --preview-method taesd.",
+      "size": "19.6 MB",
       "models": [
         {"type": "vae_approx", "hf": "madebyollin/taesd", "file": "taesd_decoder.safetensors", "size": 4895612},
         {"type": "vae_approx", "hf": "madebyollin/taesd", "file": "taesd_encoder.safetensors", "size": 4895600},
@@ -21,8 +21,8 @@
     },
 
     "starter": {
-      "description": "Exemple de profil qui regroupe les deux autres (extends).",
-      "size": "19,6 Mo",
+      "description": "Example profile grouping the other two (extends).",
+      "size": "19.6 MB",
       "extends": ["essential-nodes", "taesd-previews"]
     }
   }

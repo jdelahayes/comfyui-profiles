@@ -1,4 +1,4 @@
-// Onglet « Profils » de la barre latérale ComfyUI : voir __init__.py pour les routes appelées.
+// "Profiles" tab of the ComfyUI sidebar: see __init__.py for the routes it calls.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
@@ -7,9 +7,9 @@ const EVENT = "comfy-profiles.log";
 const MAX_LOG_LINES = 5000;
 const LANG_HEADER = "Comfy-Profiles-Lang";
 
-// Traductions : les messages sont en français dans le code et servent de clés ; le serveur
-// fournit {message français: traduction} pour la langue de ComfyUI (voir profiles_i18n.py).
-let LANG = "fr";
+// Translations: messages are in English in the code and serve as keys; the server provides
+// {English message: translation} for ComfyUI's language (see profiles_i18n.py).
+let LANG = "en";
 let MESSAGES = {};
 
 function t(message, values = {}) {
@@ -17,7 +17,7 @@ function t(message, values = {}) {
   return text.replace(/\{(\w+)\}/g, (all, key) => (key in values ? String(values[key]) : all));
 }
 
-// Langue de l'interface de ComfyUI (réglage Comfy.Locale), sinon celle du navigateur.
+// Language of the ComfyUI interface (Comfy.Locale setting), otherwise the browser's.
 async function loadMessages() {
   const wanted = app.extensionManager?.setting?.get?.("Comfy.Locale") || navigator.language || "en";
   try {
@@ -136,17 +136,17 @@ function toast(severity, summary, detail, life = 5000) {
   app.extensionManager?.toast?.add({ severity, summary, detail, life });
 }
 
-// --- Profils déclarés par le workflow ouvert ------------------------------------------------
+// --- Profiles declared by the open workflow -------------------------------------------------
 
-// Node « Workflow profiles » (profiles_node.py) : profils dont le workflow a besoin, et URL du
-// fichier de profils qui les définit.
+// "Workflow profiles" node (profiles_node.py): profiles the workflow needs, and URL of the
+// profiles file that defines them.
 const WORKFLOW_NODE = "WorkflowProfiles";
 const PROFILE_NAME = /^[\w.-]+$/;
-// États où le profil n'a rien à installer pour le workflow (voir STATES).
+// States where the profile has nothing to install for the workflow (see STATES).
 const SATISFIED = new Set(["installed", "empty"]);
 
-// [{name, source, valid}] des nodes « Workflow profiles » du workflow ouvert, sous-graphes
-// compris ; pour un profil déclaré plusieurs fois, la première source non vide.
+// [{name, source, valid}] of the "Workflow profiles" nodes of the open workflow, subgraphs
+// included; for a profile declared several times, the first non-empty source.
 function workflowNeeds() {
   const graph = app.rootGraph ?? app.graph;
   if (!graph) return [];
@@ -163,16 +163,16 @@ function workflowNeeds() {
   return [...needs].map(([name, source]) => ({ name, source, valid: PROFILE_NAME.test(name) }));
 }
 
-// Profil déclaré : sa ligne de `list --json`, ou null s'il n'est pas dans le fichier de profils.
+// Declared profile: its `list --json` entry, or null if it is not in the profiles file.
 function declared(profiles, need) {
   return need.valid && Object.hasOwn(profiles, need.name) ? profiles[need.name] : null;
 }
 
-// Dernière alerte affichée, pour ne pas la répéter à chaque rechargement du même graphe
-// (annuler / rétablir, retour sur un onglet).
+// Last alert shown, so as not to repeat it at each reload of the same graph (undo / redo, back
+// to a tab).
 let lastAlert = "";
 
-// À l'ouverture d'un workflow : alerte si des profils qu'il déclare manquent.
+// When a workflow opens: alert if profiles it declares are missing.
 async function checkWorkflow() {
   const needs = workflowNeeds();
   panel?.render();
@@ -187,14 +187,14 @@ async function checkWorkflow() {
   const missing = needs.flatMap((need) => {
     const p = declared(profiles, need);
     if (p && SATISFIED.has(p.state)) return [];
-    const state = !need.valid ? t("nom invalide")
-      : p ? t(STATES[p.state]?.label ?? STATES.missing.label) : t("absent du fichier de profils");
+    const state = !need.valid ? t("invalid name")
+      : p ? t(STATES[p.state]?.label ?? STATES.missing.label) : t("not in the profiles file");
     return [`${need.name} (${state.toLowerCase()})`];
   });
   const key = missing.join(", ");
   if (key && key !== lastAlert) {
-    toast("warn", t("Profils"),
-      t("Ce workflow a besoin de profils : {names}. Voir le panneau Profils.", { names: key }), 10000);
+    toast("warn", t("Profiles"),
+      t("This workflow needs profiles: {names}. See the Profiles panel.", { names: key }), 10000);
   }
   lastAlert = key;
 }
@@ -202,25 +202,25 @@ async function checkWorkflow() {
 class ProfilesPanel {
   constructor() {
     this.root = el("div", { class: "cprof" });
-    this.data = null;          // résultat de `list --json`
+    this.data = null;          // result of `list --json`
     this.selected = new Set();
-    this.expanded = new Map();  // profil -> état (`show --json`), ou null pendant le chargement
-    this.leavesOnly = loadSetting(LEAVES_KEY) === "1";  // seulement les profils au bout de l'arbre
-    this.namesOnly = loadSetting(NAMES_KEY) === "1";    // filtre texte sur le nom des profils seul
+    this.expanded = new Map();  // profile -> state (`show --json`), or null while loading
+    this.leavesOnly = loadSetting(LEAVES_KEY) === "1";  // only the profiles at the end of the tree
+    this.namesOnly = loadSetting(NAMES_KEY) === "1";    // text filter on the profile names only
     this.grouped = loadSetting(GROUPED_KEY) === "1";    // profils finaux : aussi ceux d'un regroupement
-    // Filtre sur l'état (clés de STATE_FILTERS) ; vide : tous les profils.
+    // Filter on the state (keys of STATE_FILTERS); empty: all profiles.
     this.states = new Set((loadSetting(STATES_KEY) || "").split(",").filter((k) => k in STATE_FILTERS));
-    this.unmanagedOnly = loadSetting(UNMANAGED_KEY) === "1";  // profils avec des éléments non pris en charge
-    // Filtre texte : un seul champ, gardé d'un rendu à l'autre (voir render()).
+    this.unmanagedOnly = loadSetting(UNMANAGED_KEY) === "1";  // profiles with unmanaged items
+    // Text filter: a single field, kept from one render to the next (see render()).
     this.search = el("input", {
-      type: "search", class: "search", placeholder: t("Filtrer : profil ou élément (modèle, custom node…)"),
+      type: "search", class: "search", placeholder: t("Filter: profile or item (model, custom node…)"),
       oninput: () => this.render(),
     });
     this.sync = { running: false };
-    this.logLines = new Map();  // index -> élément
-    this.editing = null;        // { path, source, writable, text } en mode édition
+    this.logLines = new Map();  // index -> element
+    this.editing = null;        // { path, source, writable, text } in edit mode
     this.uninstall = null;      // { profiles, plan } en attente de confirmation
-    this.settings = null;       // réglages des téléchargements (`settings`) en mode configuration
+    this.settings = null;       // download settings (`settings`) in settings mode
     this.error = "";
     this.logBox = el("div", { class: "log" });
     api.addEventListener(EVENT, (e) => this.onLog(e.detail));
@@ -234,7 +234,7 @@ class ProfilesPanel {
       this.setSync(sync);
       for (const name of this.expanded.keys()) this.expand(name, true);
     } catch (e) {
-      this.error = t("Profils indisponibles : {error}", { error: e.message });
+      this.error = t("Profiles unavailable: {error}", { error: e.message });
     }
     this.render();
   }
@@ -267,7 +267,7 @@ class ProfilesPanel {
   onLog(detail) {
     if (!detail.done) {
       if (!this.sync.running) {
-        // Synchronisation lancée depuis un autre onglet : on la rattrape.
+        // Sync started from another tab: catch up with it.
         this.sync = { running: true, profiles: [], lines: [] };
         this.render();
       }
@@ -277,12 +277,12 @@ class ProfilesPanel {
     const { action, dry_run: dryRun, force, returncode } = detail;
     this.sync = { ...this.sync, running: false, stopping: false, action, dry_run: dryRun, force, returncode };
     const what = dryRun && action === "sync" ? "Dry-run" : actionLabel(action, force);
-    if (returncode === 0) toast("success", t("Profils"), t("{action} : terminé.", { action: what }));
-    else if (returncode === 130) toast("warn", t("Profils"), t("{action} : arrêté.", { action: what }));
-    else toast("error", t("Profils"), t("{action} : incomplet, voir les logs.", { action: what }));
-    // Modèles ajoutés ou supprimés : listes des nodes mises à jour tout de suite.
+    if (returncode === 0) toast("success", t("Profiles"), t("{action}: done.", { action: what }));
+    else if (returncode === 130) toast("warn", t("Profiles"), t("{action}: stopped.", { action: what }));
+    else toast("error", t("Profiles"), t("{action}: incomplete, see the logs.", { action: what }));
+    // Models added or removed: node lists updated right away.
     if (!dryRun && action !== "sizes") app.refreshComboInNodes?.();
-    // États des profils (et détails dépliés) à jour après l'action.
+    // Profile states (and expanded details) up to date after the action.
     this.load();
   }
 
@@ -302,55 +302,54 @@ class ProfilesPanel {
     if (this.expanded.has(name)) this.render();
   }
 
-  // force : pour « sizes », réinterroge aussi les fichiers dont la taille est connue ; pour
-  // « sync », met aussi à jour ce qui a changé à la source.
+  // force: for "sizes", also queries again the files whose size is known; for "sync", also
+  // updates what changed at the source.
   async startSync(dryRun, action = "sync", profiles = [...this.selected], withExtends = false, force = false) {
     try {
       this.setSync(await request("POST", "/sync",
         { action, profiles, dry_run: dryRun, with_extends: withExtends, force }));
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     this.render();
   }
 
   async stop() {
-    if (!confirm(t("Arrêter l'action en cours ? L'étape en cours est abandonnée proprement, " +
-                   "une prochaine synchronisation la reprendra."))) return;
+    if (!confirm(t("Stop the running action? The current step is cleanly abandoned; the next " +
+                   "sync will resume it."))) return;
     try {
       const { running, stopping } = await request("POST", "/stop");
       this.sync = { ...this.sync, running, stopping };
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     this.render();
   }
 
-  // withExtends : désinstaller aussi les profils dont ils héritent (sinon seulement leurs
-  // éléments propres).
+  // withExtends: also uninstall the profiles they inherit from (otherwise only their own
+  // items).
   async prepareUninstall(profiles = [...this.selected], withExtends = false) {
     try {
       const plan = await request("GET",
         `/uninstall-plan?profiles=${encodeURIComponent(profiles.join(","))}&with_extends=${withExtends ? 1 : 0}`);
       this.uninstall = { profiles, plan, withExtends };
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     this.render();
   }
 
-  // Prend en charge ce qui est déjà présent pour le profil : la désinstallation pourra le
-  // supprimer.
+  // Takes over what is already there for the profile: uninstalling can then remove it.
   async adopt(name, count) {
-    if (!confirm(t("Prendre en charge {n} élément(s) déjà présent(s) pour {name} (extends compris) ?",
+    if (!confirm(t("Take over {n} item(s) already present for {name} (including extends)?",
                    { n: count, name }) + "\n\n" +
-                 t("La désinstallation pourra ensuite les supprimer, y compris des custom nodes " +
-                   "installés avec le Manager ou des modèles copiés à la main."))) return;
+                 t("Uninstalling can then remove them, including custom nodes installed with the " +
+                   "Manager or models copied by hand."))) return;
     try {
       const { adopted } = await request("POST", "/adopt", { profiles: [name] });
-      toast("success", t("Profils"), t("{name} : {n} élément(s) pris en charge.", { name, n: adopted.length }));
+      toast("success", t("Profiles"), t("{name}: {n} item(s) taken over.", { name, n: adopted.length }));
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     await this.load();
   }
@@ -362,12 +361,12 @@ class ProfilesPanel {
   }
 
   async restart() {
-    if (!confirm(t("Redémarrer ComfyUI ? Les générations en cours seront interrompues."))) return;
+    if (!confirm(t("Restart ComfyUI? Running generations will be interrupted."))) return;
     try {
       await request("POST", "/restart");
-      toast("info", t("Profils"), t("Redémarrage de ComfyUI… la page se reconnecte toute seule."));
+      toast("info", t("Profiles"), t("Restarting ComfyUI… the page reconnects by itself."));
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
   }
 
@@ -376,7 +375,7 @@ class ProfilesPanel {
       this.editing = await request("GET", "/config");
       this.editError = "";
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     this.render();
   }
@@ -385,7 +384,7 @@ class ProfilesPanel {
     try {
       await request("PUT", "/config", { text });
       this.editing = null;
-      toast("success", t("Profils"), t("profiles.json enregistré."));
+      toast("success", t("Profiles"), t("profiles.json saved."));
       await this.load();
     } catch (e) {
       this.editError = e.message;
@@ -394,33 +393,33 @@ class ProfilesPanel {
     }
   }
 
-  // Remplace le fichier de profils par un fichier choisi sur le poste (même validation que
-  // l'édition : rien n'est remplacé si le fichier est invalide).
+  // Replaces the profiles file with a file picked on this computer (same validation as
+  // editing: nothing is replaced if the file is invalid).
   importFile() {
     const input = el("input", { type: "file", accept: ".json,application/json" });
     input.addEventListener("change", async () => {
       const file = input.files[0];
-      if (!file || !confirm(t("Remplacer le fichier de profils par {file} ?", { file: file.name }))) return;
+      if (!file || !confirm(t("Replace the profiles file with {file}?", { file: file.name }))) return;
       try {
         await request("PUT", "/config", { text: await file.text(), origin: `import ${file.name}` });
-        toast("success", t("Profils"), t("{file} importé.", { file: file.name }));
+        toast("success", t("Profiles"), t("{file} imported.", { file: file.name }));
         await this.load();
       } catch (e) {
-        toast("error", t("Profils"), e.message);
+        toast("error", t("Profiles"), e.message);
       }
     });
     input.click();
   }
 
   async importUrl() {
-    const url = prompt(t("URL du fichier de profils (ex. lien raw GitHub ou gist) :"));
+    const url = prompt(t("URL of the profiles file (e.g. a raw GitHub or gist link):"));
     if (!url?.trim()) return;
     try {
       await request("POST", "/config/import-url", { url: url.trim() });
-      toast("success", t("Profils"), t("Fichier de profils importé."));
+      toast("success", t("Profiles"), t("Profiles file imported."));
       await this.load();
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
   }
 
@@ -434,18 +433,18 @@ class ProfilesPanel {
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
   }
 
   async resetToSeed() {
-    if (!confirm(t("Revenir au modèle ? Ton fichier de profils est gardé en profiles.json.bak."))) return;
+    if (!confirm(t("Go back to the template? Your profiles file is kept as profiles.json.bak."))) return;
     try {
       const { backup } = await request("DELETE", "/config");
-      toast("success", t("Profils"), t("Modèle rétabli, ancien fichier : {path}", { path: backup }));
+      toast("success", t("Profiles"), t("Template restored, old file: {path}", { path: backup }));
       await this.load();
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
   }
 
@@ -454,18 +453,18 @@ class ProfilesPanel {
       this.settings = await request("GET", "/settings");
       this.settingsError = "";
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     this.render();
   }
 
-  // values : {réglage: valeur} à enregistrer ; ceux qui ne changent pas ne sont pas envoyés, pour
-  // garder la valeur par défaut ou celle de l'environnement.
+  // values: {setting: value} to save; those that don't change are not sent, to keep the
+  // default value or the environment's.
   async saveSettings(values) {
     try {
       await request("PUT", "/settings", { values });
       this.settings = null;
-      toast("success", t("Profils"), t("Réglages enregistrés : ils s'appliquent à la prochaine synchronisation."));
+      toast("success", t("Profiles"), t("Settings saved: they apply to the next sync."));
     } catch (e) {
       this.settingsError = e.message;
     }
@@ -473,7 +472,7 @@ class ProfilesPanel {
   }
 
   async resetSettings() {
-    if (!confirm(t("Revenir aux réglages par défaut ?"))) return;
+    if (!confirm(t("Go back to the default settings?"))) return;
     try {
       this.settings = await request("DELETE", "/settings");
       this.settingsError = "";
@@ -485,20 +484,20 @@ class ProfilesPanel {
 
   async cleanPartials() {
     const { count, size } = this.settings.partials;
-    if (!confirm(t("Supprimer {n} téléchargement(s) partiel(s) ({size}) ? Ils repartiront de zéro.",
+    if (!confirm(t("Delete {n} partial download(s) ({size})? They will start over.",
                    { n: count, size: humanSize(size) }))) return;
     try {
       this.settings = await request("POST", "/settings/clean-partials");
       const { removed } = this.settings;
-      toast("success", t("Profils"), t("{n} téléchargement(s) partiel(s) supprimé(s), {size} libérés.",
+      toast("success", t("Profiles"), t("{n} partial download(s) deleted, {size} freed.",
         { n: removed?.count ?? 0, size: humanSize(removed?.size ?? 0) }));
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     this.render();
   }
 
-  // Case à cocher d'un filtre, mémorisée dans ce navigateur.
+  // Checkbox of a filter, remembered in this browser.
   toggle(prop, key, label, title) {
     return el("label", { class: "muted filter", title },
       el("input", {
@@ -513,7 +512,7 @@ class ProfilesPanel {
   }
 
   render() {
-    // Le rendu reconstruit tout le panneau : on rend au champ de filtre le focus et le curseur.
+    // Rendering rebuilds the whole panel: give the filter field its focus and cursor back.
     const focused = document.activeElement === this.search;
     const { selectionStart, selectionEnd } = this.search;
     this.root.replaceChildren(
@@ -531,37 +530,37 @@ class ProfilesPanel {
       el("span", { class: "muted" }, kind), el("span", { class: "name" }, name),
       extra && el("span", { class: "muted" }, extra));
     return el("div", { style: "display:flex;flex-direction:column;gap:8px" },
-      el("h3", {}, t("Désinstaller : {names}", { names: profiles.join(", ") })),
+      el("h3", {}, t("Uninstall: {names}", { names: profiles.join(", ") })),
       plan.extends.length > 0 && el("label", { class: "bar", style: "cursor:pointer" },
         el("input", { type: "checkbox", checked: withExtends,
                       onchange: (e) => this.prepareUninstall(profiles, e.target.checked) }),
-        t("Inclure les profils hérités ({names})", { names: plan.extends.join(", ") })),
+        t("Include the inherited profiles ({names})", { names: plan.extends.join(", ") })),
       plan.extends.length > 0 && !withExtends && el("div", { class: "muted" },
-        t("Seuls les éléments propres à ce(s) profil(s) partent ; les profils hérités restent installés.")),
+        t("Only the items of these profiles themselves are removed; inherited profiles stay installed.")),
       plan.remove.length
-        ? el("div", {}, t("{n} élément(s) supprimé(s), {size} libérés :",
+        ? el("div", {}, t("{n} item(s) removed, {size} freed:",
           { n: plan.remove.length, size: humanSize(plan.freed) }))
         : el("div", { class: "muted" }, plan.extends.length && !withExtends
-          ? t("Rien à supprimer en propre : coche « Inclure les profils hérités » pour un profil qui ne fait que les regrouper.")
-          : t("Rien à supprimer : tout est absent ou encore utilisé.")),
+          ? t("Nothing of its own to remove: tick “Include the inherited profiles” for a profile that only groups others.")
+          : t("Nothing to remove: everything is missing or still in use.")),
       el("div", { class: "details" }, plan.remove.map((r) => item(r.kind, r.name, humanSize(r.size)))),
       plan.kept.length > 0 && el("div", { class: "muted" },
-        t("Conservés, car utilisés par {names} :", { names: plan.keep_profiles.join(", ") })),
+        t("Kept, because used by {names}:", { names: plan.keep_profiles.join(", ") })),
       plan.kept.length > 0 && el("div", { class: "details" },
         plan.kept.map((k) => item(k.kind, k.name, k.by.join(", ")))),
       plan.startup.length > 0 && el("div", { class: "warn" },
-        t("{names} : dans COMFY_PROFILES, réinstallé(s) au prochain démarrage.", { names: plan.startup.join(", ") })),
+        t("{names}: in COMFY_PROFILES, reinstalled at the next startup.", { names: plan.startup.join(", ") })),
       plan.unmanaged.length > 0 && el("div", { class: "muted" },
-        t("Laissés en place, car pas installés par le gestionnaire :")),
+        t("Left in place, because not installed by the manager:")),
       plan.unmanaged.length > 0 && el("div", { class: "details" },
         plan.unmanaged.map((u) => item(u.kind, u.name))),
       plan.remove.some((r) => r.kind === "custom_node") && el("div", { class: "warn" },
-        t("Des custom nodes seront supprimés : redémarre ComfyUI ensuite pour les décharger.")),
-      el("div", { class: "muted" }, t("Les paquets pip installés pour ces profils restent en place.")),
+        t("Custom nodes will be removed: restart ComfyUI afterwards to unload them.")),
+      el("div", { class: "muted" }, t("The pip packages installed for these profiles stay in place.")),
       el("div", { class: "bar" },
         el("button", { class: "danger", disabled: !plan.remove.length, onclick: () => this.confirmUninstall() },
-          t("Désinstaller")),
-        el("button", { onclick: () => { this.uninstall = null; this.render(); } }, t("Annuler"))),
+          t("Uninstall")),
+        el("button", { onclick: () => { this.uninstall = null; this.render(); } }, t("Cancel"))),
     );
   }
 
@@ -569,27 +568,27 @@ class ProfilesPanel {
     const area = el("textarea", { spellcheck: "false" });
     area.value = this.editing.text;
     return el("div", { class: "cprof-editor", style: "display:flex;flex-direction:column;gap:8px" },
-      el("h3", {}, t("Éditer les profils")),
+      el("h3", {}, t("Edit profiles")),
       el("div", { class: "muted" }, this.editing.path),
       this.editing.source === "seed" && el("div", { class: "warn" },
-        t("C'est le modèle, en lecture seule : l'enregistrement crée ton fichier de profils " +
-          "({path}), utilisé ensuite à sa place.", { path: this.editing.writable })),
+        t("This is the read-only template: saving creates your profiles file ({path}), used from " +
+          "then on instead.", { path: this.editing.writable })),
       area,
       this.editError && el("div", { class: "error" }, this.editError),
       el("div", { class: "bar" },
-        el("button", { class: "primary", onclick: () => this.save(area.value) }, t("Enregistrer")),
-        el("button", { onclick: () => { this.editing = null; this.render(); } }, t("Annuler"))),
+        el("button", { class: "primary", onclick: () => this.save(area.value) }, t("Save")),
+        el("button", { onclick: () => { this.editing = null; this.render(); } }, t("Cancel"))),
     );
   }
 
-  // Réglages des téléchargements : valeur enregistrée, sinon celle de l'environnement, sinon le
-  // défaut (voir DOWNLOAD_SETTINGS dans comfy_profiles.py).
+  // Download settings: saved value, otherwise the environment's, otherwise the default (see
+  // DOWNLOAD_SETTINGS in comfy_profiles.py).
   renderSettings() {
     const s = this.settings;
     const locked = !!this.data?.readonly;
-    // D'où vient la valeur affichée, quand elle n'est pas enregistrée.
+    // Where the value shown comes from, when it is not saved.
     const origin = (key) => key in s.saved ? null
-      : el("span", { class: "muted" }, s.env[key] ? t("(d'après {var})", { var: s.env[key] }) : t("(défaut)"));
+      : el("span", { class: "muted" }, s.env[key] ? t("(from {var})", { var: s.env[key] }) : t("(default)"));
     const jobs = el("input", { type: "number", class: "num", min: 1, max: s.max_jobs, step: 1,
                                value: s.values.jobs, disabled: locked });
     const hfPerf = el("input", { type: "checkbox", checked: s.values.hf_high_performance, disabled: locked });
@@ -602,42 +601,42 @@ class ProfilesPanel {
     };
     const { count, size } = s.partials;
     return el("div", { style: "display:flex;flex-direction:column;gap:8px" },
-      el("h3", {}, t("Configuration")),
+      el("h3", {}, t("Settings")),
       el("div", { class: "muted" }, s.file),
-      locked && el("div", { class: "warn" }, t("Lecture seule (COMFY_PROFILES_READONLY) : réglages non modifiables.")),
-      el("h4", {}, t("Téléchargements")),
-      el("label", { class: "field" }, t("Fichiers téléchargés à la fois"), jobs, origin("jobs")),
+      locked && el("div", { class: "warn" }, t("Read-only (COMFY_PROFILES_READONLY): settings cannot be changed.")),
+      el("h4", {}, t("Downloads")),
+      el("label", { class: "field" }, t("Files downloaded at a time"), jobs, origin("jobs")),
       el("div", { class: "muted" },
-        t("Modèles et workflows, de 1 à {max} ; les custom nodes et paquets pip passent avant, un à un.",
+        t("Models and workflows, from 1 to {max}; custom nodes and pip packages go first, one by one.",
           { max: s.max_jobs })),
       el("label", { class: "field", style: "flex-wrap:nowrap" }, hfPerf,
-        el("span", {}, t("Hugging Face : mode haute performance (Xet)"), " ", origin("hf_high_performance"))),
+        el("span", {}, t("Hugging Face: high performance mode (Xet)"), " ", origin("hf_high_performance"))),
       el("div", { class: "muted" },
-        t("Plus de connexions et de mémoire pour chaque fichier (HF_XET_HIGH_PERFORMANCE).")),
+        t("More connections and memory for each file (HF_XET_HIGH_PERFORMANCE).")),
       s.hf_xet
         ? el("div", { class: "muted" }, `huggingface_hub ${s.huggingface_hub ?? "?"} · hf_xet ${s.hf_xet}`)
         : el("div", { class: "warn" },
-          t("hf_xet absent : Hugging Face télécharge sans Xet, plus lentement (pip install hf_xet).")),
+          t("hf_xet not installed: Hugging Face downloads without Xet, more slowly (pip install hf_xet).")),
       el("div", { class: "muted" },
-        t("Un téléchargement CivitAI, GitHub, URL ou Google Drive interrompu reprend où il en était ; " +
-          "Hugging Face repart de zéro (huggingface_hub ne sait pas reprendre).")),
-      el("h4", {}, t("Téléchargements partiels")),
+        t("An interrupted CivitAI, GitHub, URL or Google Drive download resumes where it " +
+          "stopped; Hugging Face starts over (huggingface_hub cannot resume).")),
+      el("h4", {}, t("Partial downloads")),
       el("div", { class: "bar" },
         el("span", { class: "muted" }, count
-          ? t("{n} fichier(s), {size}, repris par la prochaine synchronisation", { n: count, size: humanSize(size) })
-          : t("Aucun")),
+          ? t("{n} file(s), {size}, resumed by the next sync", { n: count, size: humanSize(size) })
+          : t("None")),
         count > 0 && el("button", {
           disabled: locked || this.sync.running, onclick: () => this.cleanPartials(),
-          title: t("Supprime les fichiers .part et le dossier de staging (pas pendant une action)"),
-        }, t("Supprimer"))),
+          title: t("Deletes the .part files and the staging folder (not during an action)"),
+        }, t("Delete"))),
       this.settingsError && el("div", { class: "error" }, this.settingsError),
       el("div", { class: "bar" },
-        el("button", { class: "primary", disabled: locked, onclick: save }, t("Enregistrer")),
-        el("button", { onclick: () => { this.settings = null; this.render(); } }, t("Annuler")),
+        el("button", { class: "primary", disabled: locked, onclick: save }, t("Save")),
+        el("button", { onclick: () => { this.settings = null; this.render(); } }, t("Cancel")),
         Object.keys(s.saved).length > 0 && el("button", { disabled: locked, onclick: () => this.resetSettings() },
-          t("Valeurs par défaut"))),
+          t("Defaults"))),
       el("div", { class: "muted" },
-        t("Les réglages s'appliquent aux synchronisations suivantes, depuis le panneau comme au démarrage du conteneur.")),
+        t("Settings apply to the following syncs, from the panel as well as at container startup.")),
     );
   }
 
@@ -645,31 +644,31 @@ class ProfilesPanel {
     const running = this.sync.running;
     const header = el("div", {},
       el("div", { class: "head" },
-        el("h3", { style: "flex:1" }, t("Profils")),
-        iconButton("pi-cog", t("Configuration"), false, () => this.openSettings())),
+        el("h3", { style: "flex:1" }, t("Profiles")),
+        iconButton("pi-cog", t("Settings"), false, () => this.openSettings())),
       this.data && el("div", { class: "muted", title: this.data.config },
         `${SOURCES[this.data.source] ? t(SOURCES[this.data.source]) : this.data.source} : ${this.data.config}`),
       this.data?.readonly && el("div", { class: "warn" },
-        t("Lecture seule (COMFY_PROFILES_READONLY) : seul le dry-run est possible.")),
+        t("Read-only (COMFY_PROFILES_READONLY): only dry-run is possible.")),
       this.error && el("div", { class: "error" }, this.error));
-    // Fichier de profils invalide : on peut encore le corriger, le remplacer ou revenir au modèle.
+    // Invalid profiles file: it can still be fixed, replaced, or reset to the template.
     if (!this.data) {
       return el("div", { style: "display:flex;flex-direction:column;gap:10px" }, header,
-        el("div", { class: "bar" }, el("button", { onclick: () => this.load() }, t("Recharger"))),
+        el("div", { class: "bar" }, el("button", { onclick: () => this.load() }, t("Reload"))),
         this.configBar(running, null));
     }
     const locked = running || this.data.readonly;
 
-    // Profils au bout de l'arbre des dépendances : aucun autre profil ne les étend. Avec
-    // this.grouped, un profil étendu seulement par des profils de regroupement (ex.
-    // minimax-h3-all-*) compte aussi comme final. Un profil sélectionné reste affiché, pour ne
-    // pas agir sur une sélection invisible.
+    // Profiles at the end of the dependency tree: no other profile extends them. With
+    // this.grouped, a profile extended only by grouping profiles (e.g. minimax-h3-all-*) also
+    // counts as final. A selected profile stays shown, so as not to act on an invisible
+    // selection.
     const parents = new Set(Object.values(this.data.profiles)
       .filter((p) => !(this.grouped && isGroup(p))).flatMap((p) => p.extends));
     const entries = Object.entries(this.data.profiles);
-    // Filtre texte : nom du profil, sinon noms de ses éléments (extends compris).
+    // Text filter: profile name, otherwise names of its items (extends included).
     const query = this.search.value.trim().toLowerCase();
-    const matches = new Map();  // profil -> éléments qui correspondent ([] : le nom correspond)
+    const matches = new Map();  // profile -> matching items ([]: the name matches)
     for (const [name, p] of entries) {
       if (!query || name.toLowerCase().includes(query)) matches.set(name, []);
       else {
@@ -701,36 +700,36 @@ class ProfilesPanel {
             name),
           el("div", { class: "actions" },
             p.unmanaged > 0 && iconButton("pi-link",
-              t("Prendre en charge les {n} élément(s) déjà présent(s) de {name}…", { n: p.unmanaged, name }),
+              t("Take over the {n} item(s) of {name} already present…", { n: p.unmanaged, name }),
               locked, () => this.adopt(name, p.unmanaged)),
             iconButton("pi-download",
-              state.install ? t("Installer {name} (ce qui manque)", { name }) : `${name} : ${label.toLowerCase()}`,
+              state.install ? t("Install {name} (what is missing)", { name }) : `${name} : ${label.toLowerCase()}`,
               locked || !state.install, () => this.startSync(false, "sync", [name])),
             iconButton("pi-trash",
-              state.uninstall ? t("Désinstaller {name}…", { name }) : `${name} : ${label.toLowerCase()}`,
+              state.uninstall ? t("Uninstall {name}…", { name }) : `${name} : ${label.toLowerCase()}`,
               locked || !state.uninstall, () => this.prepareUninstall([name])),
             iconButton(this.expanded.has(name) ? "pi-chevron-down" : "pi-chevron-right",
-              this.expanded.has(name) ? t("Masquer le détail") : t("Voir ce qui est installé"),
+              this.expanded.has(name) ? t("Hide details") : t("Show what is installed"),
               false, () => this.expand(name)))),
-        // Pastilles sous le nom : sur la même ligne, elles l'écraseraient dans la barre latérale.
+        // Chips under the name: on the same line, they would squash it in the sidebar.
         (this.data.default.includes(name) || size || todo || p.unmanaged > 0) && el("div", { class: "chips" },
           this.data.default.includes(name) &&
-            el("span", { class: "chip default", title: t("Dans COMFY_PROFILES : synchronisé à chaque démarrage") },
-              t("démarrage")),
-          size && el("span", { class: "chip", title: t("Taille totale des fichiers du profil, extends compris") }, size),
+            el("span", { class: "chip default", title: t("In COMFY_PROFILES: synced at every startup") },
+              t("startup")),
+          size && el("span", { class: "chip", title: t("Total size of the profile's files, extends included") }, size),
           todo && el("span", {
             class: "chip download",
-            title: t("Fichiers absents, que l'installation du profil ajouterait (custom nodes et paquets pip non comptés)"),
+            title: t("Missing files that installing the profile would add (custom nodes and pip packages not counted)"),
           }, todo),
           p.unmanaged > 0 && el("span", {
             class: "chip unmanaged",
-            title: t("{n} élément(s) présent(s), extends compris, mais pas installé(s) par le gestionnaire " +
-                     "(Manager, copie à la main...) : la désinstallation les laisse en place.", { n: p.unmanaged }),
-          }, t("{n} non pris en charge", { n: p.unmanaged }))),
+            title: t("{n} item(s) present, including extends, but not installed by the manager " +
+                     "(Manager, copied by hand...): uninstalling leaves them in place.", { n: p.unmanaged }),
+          }, t("{n} not managed", { n: p.unmanaged }))),
         p.description && el("div", { class: "muted" }, p.description),
         p.extends.length > 0 && el("div", { class: "muted" }, `extends : ${p.extends.join(", ")}`),
         matches.get(name)?.length > 0 && el("div", { class: "muted match" },
-          t("Contient : {items}", { items: matches.get(name).slice(0, 3).join(", ") +
+          t("Contains: {items}", { items: matches.get(name).slice(0, 3).join(", ") +
             (matches.get(name).length > 3 ? ` (+${matches.get(name).length - 3})` : "") })),
         this.expanded.has(name) && this.renderDetail(detail));
     });
@@ -740,89 +739,90 @@ class ProfilesPanel {
     const target = (this.sync.profiles || []).join(", ");
     const last = what.toLowerCase();
     const status = running
-      ? (this.sync.stopping ? t("{action} en cours d'arrêt", { action: what }) : t("{action} en cours", { action: what })) +
+      ? (this.sync.stopping ? t("{action} stopping", { action: what }) : t("{action} running", { action: what })) +
         `${target ? ` : ${target}` : ""}${this.sync.dry_run ? " (dry-run)" : ""}`
       : this.sync.returncode == null ? ""
-      : this.sync.returncode === 0 ? t("Dernière action ({action}) : OK", { action: last })
-      : this.sync.returncode === 130 ? t("Dernière action ({action}) : arrêtée", { action: last })
-      : t("Dernière action ({action}) : échec (code {code})", { action: last, code: this.sync.returncode });
+      : this.sync.returncode === 0 ? t("Last action ({action}): OK", { action: last })
+      : this.sync.returncode === 130 ? t("Last action ({action}): stopped", { action: last })
+      : t("Last action ({action}): failed (code {code})", { action: last, code: this.sync.returncode });
 
     return el("div", { style: "display:flex;flex-direction:column;gap:10px" },
       header,
       this.renderWorkflow(locked),
       el("div", { class: "bar" },
-        el("button", { onclick: () => this.load() }, t("Recharger")),
+        el("button", { onclick: () => this.load() }, t("Reload")),
         el("button", {
           onclick: () => this.startSync(false, "sizes", []), disabled: locked,
-          title: t("Interroge Hugging Face / CivitAI / GitHub (sans rien télécharger) pour les " +
-                   "fichiers sans taille, et enregistre la taille de chaque profil dans profiles.json"),
-        }, t("Recalculer les tailles")),
+          title: t("Queries Hugging Face / CivitAI / GitHub (without downloading anything) for " +
+                   "files without a size, and saves the size of each profile in profiles.json"),
+        }, t("Recalculate sizes")),
         el("button", {
           disabled: locked,
-          onclick: () => confirm(t("Réinterroger la source de tous les fichiers, même ceux dont la taille " +
-                                   "est déjà connue ? Cela peut prendre un moment.")) &&
+          onclick: () => confirm(t("Query the source of every file again, even those whose size " +
+                                   "is already known? This may take a while.")) &&
             this.startSync(false, "sizes", [], false, true),
-          title: t("Comme « Recalculer les tailles », mais réinterroge aussi les fichiers dont la taille " +
-                   "est déjà connue (après un changement de fichier à la source)"),
-        }, t("Tout recalculer")),
-        el("button", { onclick: () => this.restart(), disabled: locked }, t("Redémarrer ComfyUI"))),
+          title: t("Like “Recalculate sizes”, but also queries the files whose size is already " +
+                   "known again (after a file changed at the source)"),
+        }, t("Recalculate all")),
+        el("button", { onclick: () => this.restart(), disabled: locked }, t("Restart ComfyUI"))),
       this.configBar(locked, this.data),
       el("div", { class: "legend" },
-        // Chaque état est aussi un filtre : un clic l'ajoute ou le retire (plusieurs possibles).
+        // Each state is also a filter: a click adds or removes it (several possible).
         Object.entries(STATE_FILTERS).map(([key]) => el("span", {
           class: `state ${key}${this.states.has(key) ? " active" : ""}`,
-          title: this.states.has(key) ? t("Cliquer pour ne plus filtrer sur cet état")
-            : t("Cliquer pour n'afficher que les profils dans cet état"),
+          title: this.states.has(key) ? t("Click to stop filtering on this state")
+            : t("Click to show only the profiles in this state"),
           onclick: () => {
             this.states.has(key) ? this.states.delete(key) : this.states.add(key);
             saveSetting(STATES_KEY, [...this.states].join(","));
             this.render();
           },
-        }, t({ installed: "installé", partial: "partiellement installé", missing: "non installé" }[key]))),
+        }, t({ installed: "installed", partial: "partially installed", missing: "not installed" }[key]))),
         el("span", {
           class: `chip unmanaged state${this.unmanagedOnly ? " active" : ""}`,
-          title: `${t(UNMANAGED_HINT)}\n` + (this.unmanagedOnly ? t("Cliquer pour ne plus filtrer sur cet état")
-            : t("Cliquer pour n'afficher que les profils avec des éléments non pris en charge")),
+          title: `${t(UNMANAGED_HINT)}\n` + (this.unmanagedOnly ? t("Click to stop filtering on this state")
+            : t("Click to show only the profiles with unmanaged items")),
           onclick: () => {
             this.unmanagedOnly = !this.unmanagedOnly;
             saveSetting(UNMANAGED_KEY, this.unmanagedOnly ? "1" : "0");
             this.render();
           },
-        }, t("non pris en charge"))),
+        }, t("not managed"))),
       this.search,
       el("div", { class: "filters" },
-        this.toggle("namesOnly", NAMES_KEY, t("Chercher dans le nom des profils seulement"),
-          t("Le filtre texte ne cherche pas dans les éléments des profils (modèles, custom nodes…)")),
-        this.toggle("leavesOnly", LEAVES_KEY, t("Afficher seulement les profils finaux"),
-          t("Masque les profils étendus par d'autres (ex. les profils *-common), installés avec eux")),
-        this.leavesOnly && this.toggle("grouped", GROUPED_KEY, t("Afficher aussi les profils regroupés"),
-          t("Affiche aussi les profils finaux étendus par un profil de regroupement (sans élément propre, " +
-            "qui ne fait que réunir d'autres profils, ex. minimax-h3-all-*)")),
-        hidden > 0 && el("span", { class: "muted" }, t("({n} masqué(s))", { n: hidden }))),
+        this.toggle("namesOnly", NAMES_KEY, t("Search in profile names only"),
+          t("The text filter does not search the profiles' items (models, custom nodes…)")),
+        this.toggle("leavesOnly", LEAVES_KEY, t("Show final profiles only"),
+          t("Hides profiles extended by others (e.g. the *-common profiles), installed along with them")),
+        this.leavesOnly && this.toggle("grouped", GROUPED_KEY, t("Also show grouped profiles"),
+          t("Also shows final profiles extended by a group profile (one with no items of its own " +
+            "that only combines other profiles, e.g. minimax-h3-all-*)")),
+        hidden > 0 && el("span", { class: "muted" }, t("({n} hidden)", { n: hidden }))),
       el("div", { class: "list" }, profiles),
       el("div", { class: "bar" },
         el("button", { class: "primary", disabled: locked || !selection.length,
                        onclick: () => this.startSync(false) },
-          selection.length ? t("Synchroniser ({n})", { n: selection.length }) : t("Synchroniser")),
+          selection.length ? t("Sync ({n})", { n: selection.length }) : t("Sync")),
         el("button", { disabled: running || !selection.length, onclick: () => this.startSync(true) }, "Dry-run"),
         el("button", {
           disabled: locked || !selection.length, onclick: () => this.startSync(false, "sync", selection, false, true),
-          title: t("Installe ce qui manque et met à jour ce que le gestionnaire a installé ou pris en charge, " +
-                   "s'il a changé à la source (custom nodes, modèles, workflows, paquets pip)"),
-        }, selection.length ? t("Mettre à jour ({n})", { n: selection.length }) : t("Mettre à jour")),
+          title: t("Installs what is missing and updates what the manager installed or took " +
+                   "over, if it changed at the source (custom nodes, models, workflows, pip " +
+                   "packages)"),
+        }, selection.length ? t("Update ({n})", { n: selection.length }) : t("Update")),
         el("button", { disabled: locked || !selection.length, onclick: () => this.prepareUninstall() },
-          t("Désinstaller…")),
+          t("Uninstall…")),
         running && el("button", { class: "danger", disabled: this.sync.stopping, onclick: () => this.stop() },
-          this.sync.stopping ? t("Arrêt…") : t("Arrêter"))),
+          this.sync.stopping ? t("Stopping…") : t("Stop"))),
       el("div", { class: "muted" },
-        t("Nouveaux modèles : visibles directement. Nouveaux custom nodes : redémarrer ComfyUI.")),
+        t("New models: visible right away. New custom nodes: restart ComfyUI.")),
       status && el("div", { class: this.sync.returncode ? "error" : "muted" }, status),
       this.logBox,
     );
   }
 
-  // Profils déclarés par le workflow ouvert (node « Workflow profiles ») : état, installation,
-  // ajout depuis la source déclarée de ceux qui manquent au fichier de profils.
+  // Profiles declared by the open workflow ("Workflow profiles" node): state, install, and
+  // adding those missing from the profiles file from the declared source.
   renderWorkflow(locked) {
     const needs = workflowNeeds();
     if (!needs.length) return null;
@@ -835,81 +835,81 @@ class ProfilesPanel {
     const rows = needs.map((need) => {
       const p = declared(profiles, need);
       const state = p && (STATES[p.state] || STATES.missing);
-      const status = !need.valid ? el("span", { class: "error" }, t("nom invalide"))
-        : !p ? el("span", { class: "warn" }, t("absent du fichier de profils"))
+      const status = !need.valid ? el("span", { class: "error" }, t("invalid name"))
+        : !p ? el("span", { class: "warn" }, t("not in the profiles file"))
         : el("span", { class: SATISFIED.has(p.state) ? "ok" : "todo" }, t(state.label));
       return el("div", { class: "need" },
         el("span", { class: SATISFIED.has(p?.state) ? "ok" : "todo" }, SATISFIED.has(p?.state) ? "✓" : "✗"),
         el("span", {
-          class: "name", title: t("Afficher ce profil dans la liste"),
+          class: "name", title: t("Show this profile in the list"),
           onclick: () => { this.search.value = need.name; this.render(); },
         }, need.name),
         status,
         el("div", { class: "actions" },
           p && state.install && !SATISFIED.has(p.state) && iconButton("pi-download",
-            t("Installer {name} (ce qui manque)", { name: need.name }), locked,
+            t("Install {name} (what is missing)", { name: need.name }), locked,
             () => this.startSync(false, "sync", [need.name])),
           !p && need.valid && need.source && iconButton("pi-plus",
-            t("Ajouter {name} depuis {url}", { name: need.name, url: need.source }), locked,
+            t("Add {name} from {url}", { name: need.name, url: need.source }), locked,
             () => this.addFromSource(need.source, [need.name])),
           !p && need.valid && !need.source && el("span", {
-            class: "muted", title: t("Le node ne donne pas de source : importe le fichier de profils qui le définit."),
-          }, t("sans source"))));
+            class: "muted", title: t("The node gives no source: import the profiles file that defines it."),
+          }, t("no source"))));
     });
     return el("div", { class: `workflow${done ? " done" : ""}` },
       el("div", { class: "bar" },
-        el("strong", {}, t("Ce workflow")),
-        el("span", { class: "muted" }, t("profils déclarés par son node « Profils du workflow »"))),
+        el("strong", {}, t("This workflow")),
+        el("span", { class: "muted" }, t("profiles declared by its “Workflow profiles” node"))),
       rows,
-      done ? el("div", { class: "ok" }, t("Tous les profils de ce workflow sont installés."))
+      done ? el("div", { class: "ok" }, t("All the profiles of this workflow are installed."))
         : toInstall.length > 1 && el("div", { class: "bar" },
           el("button", { class: "primary", disabled: locked, onclick: () => this.startSync(false, "sync", toInstall) },
-            t("Installer les profils du workflow ({n})", { n: toInstall.length }))));
+            t("Install the workflow's profiles ({n})", { n: toInstall.length }))));
   }
 
-  // Ajoute au fichier de profils des profils (et ceux dont ils héritent) pris dans le fichier
-  // publié à `url`, sans remplacer ceux qui y sont déjà.
+  // Adds to the profiles file some profiles (and those they inherit from) taken from the file
+  // published at `url`, without replacing those already there.
   async addFromSource(url, names) {
-    if (!confirm(t("Ajouter {names} (et les profils dont ils héritent) à ton fichier de profils, " +
-                   "depuis {url} ? Les profils déjà présents ne sont pas modifiés.",
+    if (!confirm(t("Add {names} (and the profiles they extend) to your profiles file, from " +
+                   "{url}? Profiles already there are not changed.",
                    { names: names.join(", "), url }))) return;
     try {
       const { added, conflicts } = await request("POST", "/config/add-from-url", { url, profiles: names });
-      toast("success", t("Profils"), added.length ? t("Profils ajoutés : {names}", { names: added.join(", ") })
-        : t("Rien à ajouter : ces profils sont déjà dans ton fichier."));
+      toast("success", t("Profiles"), added.length ? t("Profiles added: {names}", { names: added.join(", ") })
+        : t("Nothing to add: these profiles are already in your file."));
       if (conflicts.length) {
-        toast("warn", t("Profils"), t("Déjà dans ton fichier avec un autre contenu, gardés tels quels : {names}",
+        toast("warn", t("Profiles"), t("Already in your file with different content, kept as they are: {names}",
           { names: conflicts.join(", ") }), 10000);
       }
     } catch (e) {
-      toast("error", t("Profils"), e.message);
+      toast("error", t("Profiles"), e.message);
     }
     await this.load();
   }
 
-  // `data` : résultat de `list --json`, ou null si le fichier de profils est illisible.
+  // `data`: result of `list --json`, or null if the profiles file is unreadable.
   configBar(locked, data) {
     return el("div", { class: "bar" },
       el("span", { class: "muted" }, "profiles.json :"),
-      el("button", { onclick: () => this.edit(), disabled: locked }, t("Éditer")),
+      el("button", { onclick: () => this.edit(), disabled: locked }, t("Edit")),
       el("button", { onclick: () => this.importFile(), disabled: locked,
-                     title: t("Remplace le fichier de profils par un fichier de ton poste") }, t("Importer…")),
+                     title: t("Replaces the profiles file with a file from your computer") }, t("Import…")),
       el("button", { onclick: () => this.importUrl(), disabled: locked,
-                     title: t("Remplace le fichier de profils par celui d'une URL") }, t("Depuis une URL…")),
-      el("button", { onclick: () => this.exportFile() }, t("Exporter")),
+                     title: t("Replaces the profiles file with the one at a URL") }, t("From a URL…")),
+      el("button", { onclick: () => this.exportFile() }, t("Export")),
       (!data || data.source === "user") && el("button", {
         onclick: () => this.resetToSeed(), disabled: locked,
-        title: data ? t("Remet en service le modèle ({path})", { path: data.seed }) : t("Remet en service le modèle"),
-      }, t("Revenir au modèle")));
+        title: data ? t("Puts the template back in use ({path})", { path: data.seed }) : t("Puts the template back in use"),
+      }, t("Back to template")));
   }
 
   renderDetail(detail) {
-    if (detail === null || detail === undefined) return el("div", { class: "details muted" }, t("Chargement…"));
+    if (detail === null || detail === undefined) return el("div", { class: "details muted" }, t("Loading…"));
     if (detail.error) return el("div", { class: "details error" }, detail.error);
-    if (!detail.length) return el("div", { class: "details muted" }, t("(profil vide)"));
+    if (!detail.length) return el("div", { class: "details muted" }, t("(empty profile)"));
     const missing = detail.filter((i) => i.missing).length;
-    // Éléments regroupés par profil qui les déclare (le profil lui-même, puis ceux dont il
-    // hérite) : `show --json` les renvoie déjà dans cet ordre.
+    // Items grouped by the profile declaring them (the profile itself, then those it inherits
+    // from): `show --json` already returns them in this order.
     const groups = [];
     for (const item of detail) {
       if (groups.at(-1)?.profile !== item.profile) {
@@ -920,11 +920,11 @@ class ProfilesPanel {
     const titled = groups.length > 1 || groups[0]?.inherited;
     return el("div", { class: "details" },
       el("div", { class: missing ? "todo" : "ok" },
-        missing ? t("{n} élément(s) à installer sur {total}", { n: missing, total: detail.length })
-          : t("Tout est installé")),
+        missing ? t("{n} of {total} item(s) to install", { n: missing, total: detail.length })
+          : t("Everything is installed")),
       groups.map((group) => [
         titled && el("div", { class: "group" },
-          group.inherited ? t("Hérité de {name}", { name: group.profile }) : t("Propre au profil"),
+          group.inherited ? t("Inherited from {name}", { name: group.profile }) : t("Profile's own"),
           el("span", { class: "muted" }, ` · ${group.items.filter((i) => !i.missing).length}/${group.items.length}`)),
         group.items.map((item) => this.renderItem(item)),
       ]));
@@ -937,10 +937,10 @@ class ProfilesPanel {
       el("span", { class: "name" }, item.name),
       FILE_KINDS.has(item.kind) && el("span", {
         class: "size muted",
-        title: item.size == null ? t("Taille inconnue : « Recalculer les tailles » l'interroge à la source")
-          : t("{n} octets", { n: item.size }),
+        title: item.size == null ? t("Unknown size: “Recalculate sizes” queries it at the source")
+          : t("{n} bytes", { n: item.size }),
       }, item.size == null ? "?" : humanSize(item.size)),
-      item.unmanaged && el("span", { class: "chip unmanaged", title: t(UNMANAGED_HINT) }, t("non pris en charge")),
+      item.unmanaged && el("span", { class: "chip unmanaged", title: t(UNMANAGED_HINT) }, t("not managed")),
       this.renderLink(item.link));
   }
 
@@ -954,60 +954,60 @@ class ProfilesPanel {
   }
 }
 
-// Lien vers la source d'un élément : icône PrimeIcons, ou texte quand il n'y en a pas.
+// Link to the source of an item: PrimeIcons icon, or text when there is none.
 const LINK_SITES = {
   hf: { label: "Hugging Face", text: "🤗" },
   github: { label: "GitHub", icon: "pi pi-github" },
   civitai: { label: "CivitAI", text: "C" },
   gdrive: { label: "Google Drive", icon: "pi pi-google" },
   pypi: { label: "PyPI", icon: "pi pi-box" },
-  git: { label: "Dépôt git", icon: "pi pi-code" },  // traduit à l'affichage
+  git: { label: "Git repository", icon: "pi pi-code" },  // translated when shown
   url: { label: "Source", icon: "pi pi-external-link" },
 };
 
-// Seuls les fichiers ont une taille déclarée (pas les custom nodes ni les paquets pip).
+// Only files have a declared size (not custom nodes nor pip packages).
 const FILE_KINDS = new Set(["model", "workflow"]);
 
-const UNMANAGED_HINT = "Présent, mais pas installé par le gestionnaire : la désinstallation le laisse en place";
+const UNMANAGED_HINT = "Present, but not installed by the manager: uninstalling leaves it in place";
 
-// Même format que human_size() côté Python : « 20,9 Go », « 20.9 GB ».
+// Same format as human_size() on the Python side: "20.9 GB", "20,9 Go".
 function humanSize(size) {
-  for (const [unit, factor] of [["To", 1e12], ["Go", 1e9], ["Mo", 1e6], ["Ko", 1e3]]) {
-    if (size >= factor) return `${(size / factor).toFixed(1).replace(".", t(","))} ${t(unit)}`;
+  for (const [unit, factor] of [["TB", 1e12], ["GB", 1e9], ["MB", 1e6], ["KB", 1e3]]) {
+    if (size >= factor) return `${(size / factor).toFixed(1).replace(".", t("."))} ${t(unit)}`;
   }
-  return `${size} ${t("o")}`;
+  return `${size} ${t("B")}`;
 }
 
-// Taille d'un profil (`list --json`) : total de ses fichiers, dans la langue du panneau ; à
-// défaut, le texte écrit dans profiles.json par « Recalculer les tailles ».
+// Size of a profile (`list --json`): total of its files, in the panel's language; failing that,
+// the text written in profiles.json by "Recalculate sizes".
 function profileSize(p) {
   if (!p.total && !p.unknown) return p.size || "";
   const total = humanSize(p.total || 0);
-  return p.unknown ? `${total} ${t("+ {n} fichier(s) de taille inconnue", { n: p.unknown })}` : total;
+  return p.unknown ? `${total} ${t("+ {n} file(s) of unknown size", { n: p.unknown })}` : total;
 }
 
-// Taille des fichiers que l'installation du profil ajouterait ; vide si rien ne manque.
+// Size of the files installing the profile would add; empty if nothing is missing.
 function todoSize(p) {
   if (!p.todo && !p.todo_unknown) return "";
-  const size = t("{size} à télécharger", { size: humanSize(p.todo || 0) });
-  return p.todo_unknown ? `${size} ${t("+ {n} fichier(s) de taille inconnue", { n: p.todo_unknown })}` : size;
+  const size = t("{size} to download", { size: humanSize(p.todo || 0) });
+  return p.todo_unknown ? `${size} ${t("+ {n} file(s) of unknown size", { n: p.todo_unknown })}` : size;
 }
 
-// Réglages du panneau propres à ce navigateur ; le stockage peut être indisponible.
+// Panel settings specific to this browser; storage may be unavailable.
 const LEAVES_KEY = "comfy-profiles.leavesOnly";
 const NAMES_KEY = "comfy-profiles.namesOnly";
 const GROUPED_KEY = "comfy-profiles.grouped";
 const STATES_KEY = "comfy-profiles.states";
 const UNMANAGED_KEY = "comfy-profiles.unmanagedOnly";
 
-// Filtres d'état de la légende -> états des profils (`list --json`) qu'ils affichent.
+// State filters of the legend -> profile states (`list --json`) they show.
 const STATE_FILTERS = {
   installed: ["installed"],
   partial: ["partial"],
   missing: ["missing", "empty"],
 };
 
-// Profil de regroupement : aucun élément propre, il ne fait que réunir d'autres profils.
+// Grouping profile: no items of its own, it only gathers other profiles.
 function isGroup(p) {
   return p.extends.length > 1 && Object.values(p.counts).every((n) => n === 0);
 }
@@ -1017,41 +1017,41 @@ function loadSetting(key) {
 }
 
 function saveSetting(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* réglage simplement non mémorisé */ }
+  try { localStorage.setItem(key, value); } catch { /* setting simply not remembered */ }
 }
 
-// force (action « sync ») : mise à jour de ce qui a changé à la source (sync --update).
+// force ("sync" action): update of what changed at the source (sync --update).
 function actionLabel(action, force = false) {
-  if (action === "sync" && force) return t("Mise à jour");
-  return t({ uninstall: "Désinstallation", sizes: "Calcul des tailles" }[action] || "Synchronisation");
+  if (action === "sync" && force) return t("Update job");
+  return t({ uninstall: "Uninstall job", sizes: "Size calculation" }[action] || "Sync job");
 }
 
-// État d'installation d'un profil (`list --json`) : libellé, et actions permises.
+// Install state of a profile (`list --json`): label, and allowed actions.
 const STATES = {
-  installed: { label: "Installé", install: false, uninstall: true },
-  partial: { label: "Partiellement installé", install: true, uninstall: true },
-  missing: { label: "Non installé", install: true, uninstall: false },
-  empty: { label: "Aucun fichier à installer (pip, ou custom nodes déjà présents hors gestionnaire)", install: true, uninstall: false },
-  error: { label: "Config invalide", install: false, uninstall: false },
+  installed: { label: "Installed", install: false, uninstall: true },
+  partial: { label: "Partially installed", install: true, uninstall: true },
+  missing: { label: "Not installed", install: true, uninstall: false },
+  empty: { label: "No file to install (pip, or custom nodes already present outside the manager)", install: true, uninstall: false },
+  error: { label: "Invalid config", install: false, uninstall: false },
 };
 
-// Origine du fichier de profils actif (`list --json`).
+// Origin of the active profiles file (`list --json`).
 const SOURCES = {
-  option: "Fichier (--config)",
-  env: "Fichier (COMFY_PROFILES_CONFIG)",
-  user: "Ton fichier",
-  seed: "Modèle (lecture seule)",
+  option: "File (--config)",
+  env: "File (COMFY_PROFILES_CONFIG)",
+  user: "Your file",
+  seed: "Template (read-only)",
 };
 
-// Petit bouton icône seule (PrimeIcons, fournies par le frontend ComfyUI) ; l'action est
-// indiquée au survol.
+// Small icon-only button (PrimeIcons, provided by the ComfyUI frontend); the action is shown on
+// hover.
 function iconButton(icon, hint, disabled, onclick) {
   return el("button", { class: "icon", title: hint, "aria-label": hint, disabled, onclick },
     el("i", { class: `pi ${icon}` }));
 }
 
 let panel = null;
-// Traductions : chargées dès init, car le dernier workflow est rouvert avant setup.
+// Translations: loaded at init, because the last workflow is reopened before setup.
 let messagesLoaded = null;
 
 app.registerExtension({
@@ -1065,7 +1065,7 @@ app.registerExtension({
   },
   async setup() {
     if (!app.extensionManager?.registerSidebarTab) {
-      console.warn("[comfy-profiles] registerSidebarTab indisponible dans ce frontend");
+      console.warn("[comfy-profiles] registerSidebarTab not available in this frontend");
       return;
     }
     await messagesLoaded;
@@ -1073,15 +1073,15 @@ app.registerExtension({
     app.extensionManager.registerSidebarTab({
       id: "comfy-profiles",
       icon: "pi pi-box",
-      title: t("Profils"),
-      tooltip: t("Profils d'utilisation (modèles, custom nodes)"),
+      title: t("Profiles"),
+      tooltip: t("Usage profiles (models, custom nodes)"),
       type: "custom",
       render: (container) => {
         if (!panel) {
           panel = new ProfilesPanel();
           panel.load();
         }
-        // Le workflow ouvert a pu changer depuis le dernier affichage.
+        // The open workflow may have changed since the last display.
         panel.render();
         container.replaceChildren(panel.root);
       },

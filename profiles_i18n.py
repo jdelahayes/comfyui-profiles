@@ -1,12 +1,12 @@
-"""Traductions des messages du gestionnaire de profils (script, serveur et panneau).
+"""Translations of the profile manager's messages (script, server and panel).
 
-Les messages sont écrits en français dans le code et servent eux-mêmes de clés : une langue
-est un fichier lang/<code>.json qui associe chaque message français à sa traduction (voir
-lang/en.json). Un message absent du fichier reste en français. Les variables s'écrivent
-{nom} dans le message et sont passées en arguments nommés : t("{n} élément(s)", n=3).
+Messages are written in English in the code and are their own keys: a language is a
+lang/<code>.json file that maps each English message to its translation (see lang/fr.json).
+A message missing from the file stays in English. Variables are written {name} in the
+message and passed as keyword arguments: t("{n} item(s)", n=3).
 
-Langue : $COMFY_PROFILES_LANG (que le panneau règle sur la langue de ComfyUI), sinon
-$LC_ALL, $LC_MESSAGES ou $LANG ; anglais par défaut, et pour une langue sans fichier.
+Language: $COMFY_PROFILES_LANG (which the panel sets to ComfyUI's language), otherwise
+$LC_ALL, $LC_MESSAGES or $LANG; English by default, and for a language without a file.
 """
 import json
 import os
@@ -14,18 +14,18 @@ import re
 from pathlib import Path
 
 LANG_DIR = Path(__file__).resolve().parent / "lang"
-SOURCE_LANG = "fr"
+SOURCE_LANG = "en"
 DEFAULT_LANG = "en"
 
 
 def available():
-    """Codes des langues disponibles (la langue des sources comprise)."""
+    """Codes of the available languages (the source language included)."""
     return sorted({SOURCE_LANG, *(p.stem for p in LANG_DIR.glob("*.json"))})
 
 
 def normalize(value):
-    """Code de langue pris en charge pour « fr_FR.UTF-8 », « en-US », « zh »... ; None si
-    `value` ne désigne pas de langue (vide, C, POSIX)."""
+    """Supported language code for "fr_FR.UTF-8", "en-US", "zh"...; None if `value` names no
+    language (empty, C, POSIX)."""
     code = re.split(r"[_.@-]", (value or "").strip().lower(), maxsplit=1)[0]
     if code in ("", "c", "posix"):
         return None
@@ -44,7 +44,7 @@ _catalogs = {}
 
 
 def catalog(lang):
-    """{message français: traduction} de la langue `lang` (vide pour le français)."""
+    """{English message: translation} for language `lang` (empty for English)."""
     if lang not in _catalogs:
         path = LANG_DIR / f"{lang}.json"
         try:
@@ -56,7 +56,7 @@ def catalog(lang):
 
 
 def fill(text, values):
-    """Remplace les {nom} connus ; laisse le reste (accolades d'un JSON...) tel quel."""
+    """Replaces the known {name}s; leaves the rest (braces of some JSON...) as is."""
     if not values:
         return text
     return re.sub(r"\{(\w+)\}",
@@ -64,7 +64,7 @@ def fill(text, values):
 
 
 def translator(lang):
-    """Fonction de traduction pour une langue donnée (ex. celle du panneau qui fait la requête)."""
+    """Translation function for a given language (e.g. that of the panel making the request)."""
     messages = catalog(lang)
 
     def translate(message, **values):
@@ -78,16 +78,16 @@ t = translator(detect())
 
 
 def doc(text, key, translate=None):
-    """Aide d'un script (son docstring) : traduite en entier sous la clé « __doc__:<key> »."""
+    """Help of a script (its docstring): translated as a whole under the key "__doc__:<key>"."""
     translated = (translate or t)(f"__doc__:{key}")
     return text if translated == f"__doc__:{key}" else translated
 
 
 def human_size(size, translate=None):
-    """« 20,9 Go » en français, « 20.9 GB » en anglais."""
+    """"20.9 GB" in English, "20,9 Go" in French."""
     translate = translate or t
-    for unit, factor in (("To", 1e12), ("Go", 1e9), ("Mo", 1e6), ("Ko", 1e3)):
+    for unit, factor in (("TB", 1e12), ("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
         if size >= factor:
-            number = f"{size / factor:.1f}".replace(".", translate(","))
+            number = f"{size / factor:.1f}".replace(".", translate("."))
             return f"{number} {translate(unit)}"
-    return f"{size} {translate('o')}"
+    return f"{size} {translate('B')}"

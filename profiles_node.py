@@ -1,13 +1,13 @@
-"""Node « Workflow profiles » : déclare, dans un workflow, les profils dont il a besoin.
+""""Workflow profiles" node: declares, in a workflow, the profiles it needs.
 
-Le node ne sert qu'à porter cette information avec le workflow : il n'a ni entrée reliable ni
-sortie et n'est pas un node de sortie (OUTPUT_NODE), donc ComfyUI ne l'exécute jamais, même s'il
-fait partie du prompt envoyé. Dans un ComfyUI sans ce plugin, il apparaît comme node manquant :
-c'est l'indication qu'il faut installer comfyui-profiles.
+The node only carries this information with the workflow: it has no linkable input, no output
+and is not an output node (OUTPUT_NODE), so ComfyUI never executes it, even when it is part of
+the submitted prompt. In a ComfyUI without this plugin, it shows up as a missing node: the hint
+that comfyui-profiles must be installed.
 
-- profiles : noms des profils, séparés par des virgules (comme en ligne de commande) ;
-- source (optionnel) : URL du fichier de profils qui les définit, pour qui ne les a pas
-  (un nom de profil n'a de sens que dans un fichier de profils donné).
+- profiles: profile names, comma-separated (as on the command line);
+- source (optional): URL of the profiles file that defines them, for users who don't have them
+  (a profile name only makes sense within a given profiles file).
 """
 
 

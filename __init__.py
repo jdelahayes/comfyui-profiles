@@ -1,23 +1,21 @@
-"""Panneau « Profils » dans ComfyUI : liste les profils d'utilisation (profiles.json), montre ce
-qui est déjà installé, lance (ou arrête) une synchronisation, une désinstallation ou le calcul
-des tailles avec ses logs en direct, édite, importe ou exporte le fichier de profils, règle les
-téléchargements et redémarre ComfyUI.
+""""Profiles" panel in ComfyUI: lists the usage profiles (profiles.json), shows what is already
+installed, starts (or stops) a sync, an uninstall or the size computation with its live logs,
+edits, imports or exports the profiles file, sets the download options and restarts ComfyUI.
 
-Ce module ajoute des routes HTTP au serveur ComfyUI, un onglet dans la barre latérale
-(web/profiles.js) et un seul node, « Workflow profiles » (profiles_node.py), jamais exécuté, qui
-déclare dans un workflow les profils dont il a besoin. Tout le travail est délégué à
-comfy_profiles.py (à côté de ce fichier, utilisable aussi en ligne de commande), lancé en
-sous-processus avec le Python de ComfyUI : les paquets pip
-s'installent ainsi dans le bon venv, et une erreur du script (sys.exit, pip...) ne peut pas
-faire tomber le serveur. Le script reçoit les chemins de ce ComfyUI (base, models, custom_nodes,
-user) par l'environnement : il travaille donc au même endroit que le serveur, quelle que soit la
-façon dont ComfyUI a été lancé (--base-directory, --user-directory...).
+This module adds HTTP routes to the ComfyUI server, a sidebar tab (web/profiles.js) and a
+single node, "Workflow profiles" (profiles_node.py), never executed, which declares in a
+workflow the profiles it needs. All the work is delegated to comfy_profiles.py (next to this
+file, also usable from the command line), run as a subprocess with ComfyUI's Python: pip
+packages are thus installed in the right venv, and an error in the script (sys.exit, pip...)
+cannot bring the server down. The script gets the paths of this ComfyUI (base, models,
+custom_nodes, user) from the environment: it therefore works in the same place as the server,
+however ComfyUI was started (--base-directory, --user-directory...).
 
-COMFY_PROFILES_READONLY=1 : panneau en lecture seule (ni installation, ni désinstallation, ni
-modification du fichier de profils, ni redémarrage ; le dry-run reste possible).
+COMFY_PROFILES_READONLY=1: read-only panel (no install, no uninstall, no change to the profiles
+file, no restart; dry-run is still possible).
 
-Langue : le panneau envoie celle de ComfyUI dans l'en-tête Comfy-Profiles-Lang ; les messages
-d'erreur des routes et ceux du script (COMFY_PROFILES_LANG) suivent. Voir profiles_i18n.py.
+Language: the panel sends ComfyUI's language in the Comfy-Profiles-Lang header; the error
+messages of the routes and of the script (COMFY_PROFILES_LANG) follow it. See profiles_i18n.py.
 """
 import asyncio
 import codecs
@@ -48,9 +46,9 @@ EVENT = "comfy-profiles.log"
 PROFILE_NAME = re.compile(r"[\w.-]+")
 MAX_LOG_LINES = 5000
 ACTIONS = ("sync", "uninstall", "sizes")
-# Après SIGINT (arrêt propre), délai avant de tuer le script et ses sous-processus.
+# After SIGINT (clean stop), delay before killing the script and its subprocesses.
 STOP_TIMEOUT = 15
-# Import depuis une URL : taille maximale du fichier de profils.
+# Import from a URL: maximum size of the profiles file.
 MAX_CONFIG_BYTES = 5 * 1024 * 1024
 READONLY = os.environ.get("COMFY_PROFILES_READONLY", "").lower() in ("1", "true", "yes")
 
@@ -58,11 +56,11 @@ LANG_HEADER = "Comfy-Profiles-Lang"
 
 routes = PromptServer.instance.routes
 log = logging.getLogger("comfy-profiles")
-t = i18n.t  # messages du serveur (logs) : langue de l'environnement
+t = i18n.t  # server messages (logs): language of the environment
 
 
 def request_lang(request):
-    """Langue du panneau qui fait la requête, sinon celle de l'environnement."""
+    """Language of the panel making the request, otherwise that of the environment."""
     return i18n.normalize(request.headers.get(LANG_HEADER)) or i18n.detect()
 
 
@@ -71,8 +69,8 @@ def tr(request):
 
 
 def cli_env(lang=None):
-    """Environnement des scripts : les chemins de ce ComfyUI, tels que le serveur les voit, et
-    la langue des messages."""
+    """Environment of the scripts: the paths of this ComfyUI, as the server sees them, and the
+    language of the messages."""
     return {
         **os.environ,
         **({"COMFY_PROFILES_LANG": lang} if lang else {}),
@@ -81,8 +79,8 @@ def cli_env(lang=None):
         "COMFY_MODELS_DIR": folder_paths.models_dir,
         "COMFY_CUSTOM_NODES_DIR": folder_paths.get_folder_paths("custom_nodes")[0],
         "COMFY_USER_DIR": folder_paths.get_user_directory(),
-        # Dossiers de chaque type de modèle, extra_model_paths.yaml compris, dans l'ordre de
-        # ComfyUI : un modèle est trouvé où que ComfyUI le voie.
+        # Folders of each model type, extra_model_paths.yaml included, in ComfyUI's order: a
+        # model is found wherever ComfyUI sees it.
         "COMFY_MODEL_FOLDERS": json.dumps({
             name: folder_paths.get_folder_paths(name)
             for name in folder_paths.folder_names_and_paths if name != "custom_nodes"
@@ -99,11 +97,11 @@ def bad_request(message):
 
 
 def writes(handler):
-    """Route qui modifie l'installation ou le fichier de profils : refusée en lecture seule."""
+    """Route that changes the installation or the profiles file: refused when read-only."""
     @functools.wraps(handler)
     async def guarded(request):
         if READONLY:
-            return json_error(403, tr(request)("panneau en lecture seule (COMFY_PROFILES_READONLY)"))
+            return json_error(403, tr(request)("read-only panel (COMFY_PROFILES_READONLY)"))
         return await handler(request)
     return guarded
 
@@ -119,14 +117,14 @@ async def run_cli(*args, config=None, lang=None):
 
 
 def cli_error(stderr, translate=t):
-    """Message d'erreur du script : ses lignes « !! ... », sinon la fin de stderr."""
+    """Error message of the script: its "!! ..." lines, otherwise the end of stderr."""
     lines = [l.strip() for l in stderr.splitlines() if l.strip()]
     errors = [l.removeprefix("!!").strip() for l in lines if l.startswith("!!")]
-    return "\n".join(errors or lines[-5:]) or translate("erreur inconnue")
+    return "\n".join(errors or lines[-5:]) or translate("unknown error")
 
 
 async def cli_json(*args, request, config=None):
-    """Lance le script avec --json, dans la langue du panneau qui fait la requête."""
+    """Runs the script with --json, in the language of the panel making the request."""
     lang = request_lang(request)
     code, out, err = await run_cli(*args, "--json", config=config, lang=lang)
     if code != 0:
@@ -138,7 +136,7 @@ def profile_names(value, request):
     names = value if isinstance(value, list) else str(value or "").split(",")
     names = [n.strip() for n in names if n.strip()]
     if not names or not all(PROFILE_NAME.fullmatch(n) for n in names):
-        raise bad_request(tr(request)("noms de profils invalides"))
+        raise bad_request(tr(request)("invalid profile names"))
     return names
 
 
@@ -146,7 +144,7 @@ def profile_names(value, request):
 
 @routes.get(f"{API}/lang/{{code}}")
 async def lang_catalog(request):
-    """Traductions pour le panneau : {message français: traduction} ({} pour le français)."""
+    """Translations for the panel: {English message: translation} ({} for English)."""
     code = i18n.normalize(request.match_info["code"]) or i18n.DEFAULT_LANG
     messages = {k: v for k, v in i18n.catalog(code).items() if not k.startswith("__doc__:")}
     return web.json_response({"lang": code, "messages": messages})
@@ -173,21 +171,21 @@ async def uninstall_plan(request):
 @routes.post(f"{API}/adopt")
 @writes
 async def adopt(request):
-    """Prend en charge ce qui est déjà présent pour des profils (voir comfy_profiles.cmd_adopt)."""
+    """Takes over what is already there for some profiles (see comfy_profiles.cmd_adopt)."""
     if job.running:
-        return json_error(409, tr(request)("une action est déjà en cours"))
+        return json_error(409, tr(request)("an action is already running"))
     names = profile_names((await request.json()).get("profiles"), request)
     result = await cli_json("adopt", ",".join(names), request=request)
-    log.info("[comfy-profiles] %s", t("{names} : {n} élément(s) pris en charge",
+    log.info("[comfy-profiles] %s", t("{names}: {n} item(s) taken over",
                                       names=",".join(names), n=len(result["adopted"])))
     return web.json_response(result)
 
 
-# --- Synchronisation / désinstallation -----------------------------------------------------
+# --- Sync / uninstall ---------------------------------------------------------------------
 
 class Job:
-    """Une seule action (sync ou uninstall) à la fois. Les logs sont gardés côté serveur pour
-    qu'un panneau ouvert en cours de route (ou après un rechargement de la page) les retrouve."""
+    """A single action (sync or uninstall) at a time. Logs are kept on the server side so that a
+    panel opened along the way (or after a page reload) finds them again."""
 
     def __init__(self):
         self.proc = None
@@ -197,7 +195,7 @@ class Job:
         self.dry_run = False
         self.force = False
         self.returncode = None
-        self.lines = {}  # index -> texte ; une barre de progression réécrit son index
+        self.lines = {}  # index -> text; a progress bar rewrites its index
         self.next_index = 0
 
     @property
@@ -225,26 +223,27 @@ class Job:
     async def start(self, action, profiles, dry_run, with_extends=False, lang=None, force=False):
         self.action, self.profiles, self.dry_run, self.force = action, profiles, dry_run, force
         self.returncode, self.lines, self.stopping = None, {}, False
-        if action == "sizes":  # tous les profils, écrit les tailles dans le fichier de profils
-            # force : réinterroge aussi les fichiers dont la taille est déjà connue.
+        if action == "sizes":  # all profiles, writes the sizes into the profiles file
+            # force: also queries again the files whose size is already known.
             cmd = [SIZES_SCRIPT] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
         else:
             cmd = [SCRIPT, action, ",".join(profiles)] + (["--dry-run"] if dry_run else [])
             if action == "uninstall" and with_extends:
                 cmd.append("--with-extends")
-            if action == "sync" and force:  # met aussi à jour ce qui a changé à la source
+            if action == "sync" and force:  # also updates what changed at the source
                 cmd.append("--update")
         self.proc = await asyncio.create_subprocess_exec(
             sys.executable, *map(str, cmd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             env=cli_env(lang),
-            # Groupe de processus à part : en dernier recours, on tue aussi git, pip...
+            # Separate process group: as a last resort, git, pip... are killed too.
             start_new_session=True)
         asyncio.create_task(self.pump())
 
     def stop(self):
-        # SIGINT au seul script : KeyboardInterrupt, il abandonne proprement l'étape en cours
-        # (fichiers .part, clone partiel...) et subprocess.run tue la commande qu'il attendait.
+        # SIGINT to the script alone: KeyboardInterrupt, it stops the current step cleanly
+        # (partial clone removed, downloads keep their .part) and subprocess.run kills the
+        # command it was waiting for.
         self.stopping = True
         self.proc.send_signal(signal.SIGINT)
         asyncio.create_task(self.kill_after_timeout(self.proc))
@@ -253,15 +252,15 @@ class Job:
         try:
             await asyncio.wait_for(proc.wait(), STOP_TIMEOUT)
         except asyncio.TimeoutError:
-            log.warning("[comfy-profiles] %s", t("arrêt propre trop long, processus tués"))
+            log.warning("[comfy-profiles] %s", t("clean stop took too long, processes killed"))
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
 
     async def pump(self):
-        # Découpe sur \n et \r : les barres de progression (téléchargements HF, pip) se
-        # réécrivent avec \r, on remplace alors la ligne en cours au lieu d'en ajouter une.
+        # Splits on \n and \r: progress lines (downloads, pip) rewrite themselves with \r, so
+        # the current line is replaced instead of adding a new one.
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         buffer = ""
         while True:
@@ -303,12 +302,12 @@ async def sync_start(request):
     body = await request.json()
     action = body.get("action", "sync")
     if action not in ACTIONS:
-        return json_error(400, _("action inconnue : {action}", action=action))
+        return json_error(400, _("unknown action: {action}", action=action))
     if job.running:
-        return json_error(409, _("une action est déjà en cours"))
+        return json_error(409, _("an action is already running"))
     dry_run = bool(body.get("dry_run"))
     if READONLY and not (dry_run and action != "sizes"):
-        return json_error(403, _("panneau en lecture seule (COMFY_PROFILES_READONLY) : dry-run seulement"))
+        return json_error(403, _("read-only panel (COMFY_PROFILES_READONLY): dry-run only"))
     profiles = [] if action == "sizes" else profile_names(body.get("profiles"), request)
     await job.start(action, profiles, dry_run, bool(body.get("with_extends")), request_lang(request),
                     force=bool(body.get("force")))
@@ -318,7 +317,7 @@ async def sync_start(request):
 @routes.post(f"{API}/stop")
 async def sync_stop(request):
     if not job.running:
-        return json_error(409, tr(request)("aucune action en cours"))
+        return json_error(409, tr(request)("no action running"))
     if not job.stopping:
         job.stop()
     return web.json_response(job.state())
@@ -327,8 +326,8 @@ async def sync_stop(request):
 # --- Fichier de profils -------------------------------------------------------------------
 
 async def config_info(request):
-    """Fichier de profils actif, son origine (option, env, user, seed) et où l'enregistrer."""
-    # `where` ne lit pas le fichier : un fichier invalide peut ainsi être corrigé ou remplacé.
+    """Active profiles file, its origin (option, env, user, seed) and where to save it."""
+    # `where` does not read the file: an invalid file can thus be fixed or replaced.
     lang = request_lang(request)
     code, out, err = await run_cli("where", lang=lang)
     if code != 0:
@@ -349,16 +348,16 @@ async def get_config(request):
 
 
 async def save_config(text, origin, request):
-    """Valide `text` sur une copie, puis remplace le fichier de profils modifiable (celui de
-    l'utilisateur quand le modèle était actif)."""
+    """Validates `text` on a copy, then replaces the writable profiles file (the user's one when
+    the template was active)."""
     try:
         names = list(json.loads(text).get("profiles") or {})
     except (json.JSONDecodeError, AttributeError) as e:
-        return json_error(400, tr(request)("JSON invalide : {error}", error=e))
+        return json_error(400, tr(request)("Invalid JSON: {error}", error=e))
     _, _, path = await config_info(request)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # `list` vérifie les clés des profils, `show` de tous les profils vérifie les extends et
-    # chaque modèle / custom node.
+    # `list` checks the profile keys, `show` of all the profiles checks the extends and each
+    # model / custom node.
     tmp = path.with_name(f".{path.name}.edit")
     tmp.write_text(text)
     try:
@@ -368,7 +367,7 @@ async def save_config(text, origin, request):
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
-    log.info("[comfy-profiles] %s", t("{path} mis à jour ({origin})", path=path, origin=origin))
+    log.info("[comfy-profiles] %s", t("{path} updated ({origin})", path=path, origin=origin))
     return web.json_response({"ok": True, "path": str(path)})
 
 
@@ -376,14 +375,14 @@ async def save_config(text, origin, request):
 @writes
 async def put_config(request):
     body = await request.json()
-    return await save_config(body.get("text", ""), body.get("origin") or t("édition dans le panneau"), request)
+    return await save_config(body.get("text", ""), body.get("origin") or t("edited in the panel"), request)
 
 
 async def fetch_config(url, request):
-    """Texte d'un fichier de profils publié à `url` (ex. lien raw GitHub ou gist)."""
+    """Text of a profiles file published at `url` (e.g. a raw GitHub or gist link)."""
     _ = tr(request)
     if not url.startswith(("https://", "http://")):
-        raise bad_request(_("URL http(s) attendue"))
+        raise bad_request(_("http(s) URL expected"))
     try:
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -394,7 +393,7 @@ async def fetch_config(url, request):
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         raise bad_request(f"{url} : {e or type(e).__name__}")
     if len(body) > MAX_CONFIG_BYTES:
-        raise bad_request(_("{url} : fichier trop gros (plus de {size})", url=url,
+        raise bad_request(_("{url}: file too large (over {size})", url=url,
                             size=i18n.human_size(MAX_CONFIG_BYTES, _)))
     return body.decode("utf-8", errors="replace")
 
@@ -404,15 +403,15 @@ async def fetch_config(url, request):
 async def import_config_url(request):
     url = str((await request.json()).get("url") or "").strip()
     text = await fetch_config(url, request)
-    return await save_config(text, t("import de {url}", url=url), request)
+    return await save_config(text, t("import from {url}", url=url), request)
 
 
 @routes.post(f"{API}/config/add-from-url")
 @writes
 async def add_profiles_from_url(request):
-    """Ajoute au fichier de profils des profils (et ceux dont ils héritent) pris dans celui
-    publié à une URL, sans rien remplacer : la source déclarée par le node « Workflow
-    profiles » d'un workflow. Voir profiles_merge.py."""
+    """Adds to the profiles file some profiles (and those they inherit from) taken from the one
+    published at a URL, without replacing anything: the source declared by a workflow's
+    "Workflow profiles" node. See profiles_merge.py."""
     body = await request.json()
     url = str(body.get("url") or "").strip()
     names = profile_names(body.get("profiles"), request)
@@ -423,7 +422,7 @@ async def add_profiles_from_url(request):
     except MergeError as e:
         return json_error(400, str(e))
     if result["added"]:
-        response = await save_config(text, t("profils ajoutés depuis {url}", url=url), request)
+        response = await save_config(text, t("profiles added from {url}", url=url), request)
         if response.status != 200:
             return response
     return web.json_response(result)
@@ -432,36 +431,35 @@ async def add_profiles_from_url(request):
 @routes.delete(f"{API}/config")
 @writes
 async def reset_config(request):
-    """Revient au modèle : le fichier de l'utilisateur est mis de côté en profiles.json.bak."""
+    """Back to the template: the user's file is set aside as profiles.json.bak."""
     path, source, _ = await config_info(request)
     if source != "user":
         return json_error(409, tr(request)(
-            "le fichier actif n'est pas celui de l'utilisateur, rien à réinitialiser"))
+            "the active file is not the user's file, nothing to reset"))
     backup = path.with_name(f"{path.name}.bak")
     path.replace(backup)
-    log.info("[comfy-profiles] %s", t("retour au modèle, ancien fichier gardé en {path}", path=backup))
+    log.info("[comfy-profiles] %s", t("back to the template, old file kept as {path}", path=backup))
     return web.json_response({"ok": True, "backup": str(backup)})
 
 
-# --- Réglages des téléchargements ---------------------------------------------------------
+# --- Download settings --------------------------------------------------------------------
 
 @routes.get(f"{API}/settings")
 async def get_settings(request):
-    """Réglages en vigueur, enregistrés et par défaut, versions de huggingface_hub / hf_xet et
-    téléchargements partiels (voir comfy_profiles.cmd_settings)."""
+    """Effective, saved and default settings, versions of huggingface_hub / hf_xet and partial
+    downloads (see comfy_profiles.cmd_settings)."""
     return web.json_response(await cli_json("settings", request=request))
 
 
 @routes.put(f"{API}/settings")
 @writes
 async def put_settings(request):
-    """Enregistre des réglages ({clé: valeur}, null : revient au défaut) ; s'appliquent à la
-    synchronisation suivante."""
+    """Saves settings ({key: value}, null: back to the default); they apply to the next sync."""
     values = (await request.json()).get("values")
     if not isinstance(values, dict):
-        return json_error(400, tr(request)("objet JSON attendu"))
+        return json_error(400, tr(request)("JSON object expected"))
     result = await cli_json("settings", "--set", json.dumps(values), request=request)
-    log.info("[comfy-profiles] %s", t("réglages des téléchargements mis à jour : {values}",
+    log.info("[comfy-profiles] %s", t("download settings updated: {values}",
                                       values=json.dumps(result["saved"])))
     return web.json_response(result)
 
@@ -475,19 +473,19 @@ async def reset_settings(request):
 @routes.post(f"{API}/settings/clean-partials")
 @writes
 async def clean_partials(request):
-    """Supprime les téléchargements partiels : jamais pendant une action, qui peut les reprendre."""
+    """Deletes the partial downloads: never during an action, which may resume them."""
     if job.running:
-        return json_error(409, tr(request)("une action est déjà en cours"))
+        return json_error(409, tr(request)("an action is already running"))
     return web.json_response(await cli_json("settings", "--clean-partials", request=request))
 
 
-# --- Redémarrage --------------------------------------------------------------------------
+# --- Restart ------------------------------------------------------------------------------
 
 def restart():
-    """Comme le redémarrage de ComfyUI-Manager : sous comfy-cli, on signale le redémarrage et on
-    quitte (comfy-cli relance) ; sinon, même PID (exec) : un conteneur dont ComfyUI est le
-    processus principal reste en vie."""
-    log.info("[comfy-profiles] %s", t("redémarrage de ComfyUI"))
+    """Like ComfyUI-Manager's restart: under comfy-cli, the restart is signaled and the process
+    exits (comfy-cli starts it again); otherwise, same PID (exec): a container whose main process
+    is ComfyUI stays alive."""
+    log.info("[comfy-profiles] %s", t("restarting ComfyUI"))
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
@@ -497,7 +495,7 @@ def restart():
         Path(os.environ["__COMFY_CLI_SESSION__"] + ".reboot").touch()
         os._exit(0)
     argv = [a for a in sys.argv if a != "--windows-standalone-build"]
-    if argv[0].endswith("__main__.py"):  # lancé en module (python -m ...)
+    if argv[0].endswith("__main__.py"):  # run as a module (python -m ...)
         cmd = [sys.executable, "-m", Path(argv[0]).parent.name, *argv[1:]]
     elif sys.platform.startswith("win32"):
         cmd = [f'"{sys.executable}"', f'"{argv[0]}"', *argv[1:]]
@@ -510,7 +508,7 @@ def restart():
 @writes
 async def restart_comfy(request):
     if job.running:
-        return json_error(409, tr(request)("action en cours, redémarrage refusé"))
-    # Laisse partir la réponse avant de remplacer le processus.
+        return json_error(409, tr(request)("action running, restart refused"))
+    # Let the response go out before replacing the process.
     asyncio.get_running_loop().call_later(0.5, restart)
     return web.json_response({"ok": True})
