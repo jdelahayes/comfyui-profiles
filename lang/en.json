@@ -323,5 +323,6 @@
   "Supprime les fichiers .part et le dossier de staging (pas pendant une action)": "Deletes the .part files and the staging folder (not during an action)",
   "Supprimer": "Delete",
   "Valeurs par défaut": "Defaults",
-  "Les réglages s'appliquent aux synchronisations suivantes, depuis le panneau comme au démarrage du conteneur.": "Settings apply to the following syncs, from the panel as well as at container startup."
+  "Les réglages s'appliquent aux synchronisations suivantes, depuis le panneau comme au démarrage du conteneur.": "Settings apply to the following syncs, from the panel as well as at container startup.",
+  "{path} n'est pas un clone git (installé depuis le Comfy Registry ?) : ref {ref} ignorée": "{path} is not a git clone (installed from the Comfy Registry?): ref {ref} ignored"
 }

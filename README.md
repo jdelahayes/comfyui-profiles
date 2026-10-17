@@ -138,7 +138,8 @@ gestionnaire installe lui-même est noté dans `user/__comfy_profiles/installed.
 `uninstall` ne supprime **que** ces éléments : un modèle copié à la main, un custom node déjà
 là (installé avec le Manager, livré avec une image Docker...) n'est jamais supprimé, ni changé
 de version, même si un profil le cite. Ses dépendances Python restent aussi l'affaire de celui
-qui l'a installé.
+qui l'a installé. Un custom node sans `.git` (installé par ComfyUI-Manager depuis le Comfy
+Registry) ne change jamais de version non plus, même pris en charge : son `ref` est ignoré.
 
 Un custom node déjà installé **sous un autre nom** est reconnu et laissé tel quel, au lieu d'être
 cloné une seconde fois (ComfyUI le chargerait deux fois) : même nom à la casse près, ou même
@@ -345,7 +346,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.7.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.7.1 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json

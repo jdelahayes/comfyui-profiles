@@ -936,7 +936,10 @@ def plan_file(item, dest, kind, paths, versions, update=False, managed=False):
 
 
 def git(store, *args, **kwargs):
-    return subprocess.run(["git", "-C", str(store), *args], **kwargs)
+    """git dans le dépôt du custom node `store`, jamais dans un dépôt parent : sans .git (node
+    installé depuis le Comfy Registry), git remonterait sinon jusqu'au clone de ComfyUI."""
+    env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(Path(store).absolute().parent)}
+    return subprocess.run(["git", "-C", str(store), *args], env=env, **kwargs)
 
 
 def at_ref(store, ref):
@@ -1207,6 +1210,9 @@ def plan_custom_node(item, where, paths, manifest, update=False):
                 subprocess.run(["git", "clone", "--depth", "1", url, str(store)], check=True)
 
         steps.append(Step(f"git clone {url}{'@' + ref if ref else ''} -> {store}", clone, record))
+    elif ref and not (store / ".git").exists():
+        print(f"   [{name}] " + t("{path} n'est pas un clone git (installé depuis le Comfy Registry ?) : "
+                            "ref {ref} ignorée", path=store, ref=ref))
     elif ref and not at_ref(store, ref):
         if managed:
             steps.append(Step(t("git checkout {ref} dans {path}", ref=ref, path=store),
