@@ -1,7 +1,7 @@
 """Panneau « Profils » dans ComfyUI : liste les profils d'utilisation (profiles.json), montre ce
 qui est déjà installé, lance (ou arrête) une synchronisation, une désinstallation ou le calcul
-des tailles avec ses logs en direct, édite, importe ou exporte le fichier de profils et
-redémarre ComfyUI.
+des tailles avec ses logs en direct, édite, importe ou exporte le fichier de profils, règle les
+téléchargements et redémarre ComfyUI.
 
 Ce module ajoute des routes HTTP au serveur ComfyUI, un onglet dans la barre latérale
 (web/profiles.js) et un seul node, « Workflow profiles » (profiles_node.py), jamais exécuté, qui
@@ -441,6 +441,44 @@ async def reset_config(request):
     path.replace(backup)
     log.info("[comfy-profiles] %s", t("retour au modèle, ancien fichier gardé en {path}", path=backup))
     return web.json_response({"ok": True, "backup": str(backup)})
+
+
+# --- Réglages des téléchargements ---------------------------------------------------------
+
+@routes.get(f"{API}/settings")
+async def get_settings(request):
+    """Réglages en vigueur, enregistrés et par défaut, versions de huggingface_hub / hf_xet et
+    téléchargements partiels (voir comfy_profiles.cmd_settings)."""
+    return web.json_response(await cli_json("settings", request=request))
+
+
+@routes.put(f"{API}/settings")
+@writes
+async def put_settings(request):
+    """Enregistre des réglages ({clé: valeur}, null : revient au défaut) ; s'appliquent à la
+    synchronisation suivante."""
+    values = (await request.json()).get("values")
+    if not isinstance(values, dict):
+        return json_error(400, tr(request)("objet JSON attendu"))
+    result = await cli_json("settings", "--set", json.dumps(values), request=request)
+    log.info("[comfy-profiles] %s", t("réglages des téléchargements mis à jour : {values}",
+                                      values=json.dumps(result["saved"])))
+    return web.json_response(result)
+
+
+@routes.delete(f"{API}/settings")
+@writes
+async def reset_settings(request):
+    return web.json_response(await cli_json("settings", "--reset", request=request))
+
+
+@routes.post(f"{API}/settings/clean-partials")
+@writes
+async def clean_partials(request):
+    """Supprime les téléchargements partiels : jamais pendant une action, qui peut les reprendre."""
+    if job.running:
+        return json_error(409, tr(request)("une action est déjà en cours"))
+    return web.json_response(await cli_json("settings", "--clean-partials", request=request))
 
 
 # --- Redémarrage --------------------------------------------------------------------------

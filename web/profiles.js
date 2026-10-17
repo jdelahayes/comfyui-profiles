@@ -35,6 +35,10 @@ const STYLE = `
   min-height: 0; overflow-y: auto; box-sizing: border-box; font-size: 13px;
   color: var(--fg-color); }
 .cprof h3 { margin: 0; font-size: 15px; }
+.cprof h4 { margin: 4px 0 0; font-size: 13px; border-bottom: 1px solid var(--border-color); }
+.cprof .field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; cursor: pointer; }
+.cprof input.num { width: 64px; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-color);
+  background: var(--comfy-input-bg); color: var(--input-text); }
 .cprof .muted { color: var(--descrip-text, #999); font-size: 12px; }
 .cprof .warn { color: #e0a030; font-size: 12px; }
 .cprof .error { color: #e05050; white-space: pre-wrap; font-size: 12px; }
@@ -216,6 +220,7 @@ class ProfilesPanel {
     this.logLines = new Map();  // index -> élément
     this.editing = null;        // { path, source, writable, text } en mode édition
     this.uninstall = null;      // { profiles, plan } en attente de confirmation
+    this.settings = null;       // réglages des téléchargements (`settings`) en mode configuration
     this.error = "";
     this.logBox = el("div", { class: "log" });
     api.addEventListener(EVENT, (e) => this.onLog(e.detail));
@@ -444,6 +449,55 @@ class ProfilesPanel {
     }
   }
 
+  async openSettings() {
+    try {
+      this.settings = await request("GET", "/settings");
+      this.settingsError = "";
+    } catch (e) {
+      toast("error", t("Profils"), e.message);
+    }
+    this.render();
+  }
+
+  // values : {réglage: valeur} à enregistrer ; ceux qui ne changent pas ne sont pas envoyés, pour
+  // garder la valeur par défaut ou celle de l'environnement.
+  async saveSettings(values) {
+    try {
+      await request("PUT", "/settings", { values });
+      this.settings = null;
+      toast("success", t("Profils"), t("Réglages enregistrés : ils s'appliquent à la prochaine synchronisation."));
+    } catch (e) {
+      this.settingsError = e.message;
+    }
+    this.render();
+  }
+
+  async resetSettings() {
+    if (!confirm(t("Revenir aux réglages par défaut ?"))) return;
+    try {
+      this.settings = await request("DELETE", "/settings");
+      this.settingsError = "";
+    } catch (e) {
+      this.settingsError = e.message;
+    }
+    this.render();
+  }
+
+  async cleanPartials() {
+    const { count, size } = this.settings.partials;
+    if (!confirm(t("Supprimer {n} téléchargement(s) partiel(s) ({size}) ? Ils repartiront de zéro.",
+                   { n: count, size: humanSize(size) }))) return;
+    try {
+      this.settings = await request("POST", "/settings/clean-partials");
+      const { removed } = this.settings;
+      toast("success", t("Profils"), t("{n} téléchargement(s) partiel(s) supprimé(s), {size} libérés.",
+        { n: removed?.count ?? 0, size: humanSize(removed?.size ?? 0) }));
+    } catch (e) {
+      toast("error", t("Profils"), e.message);
+    }
+    this.render();
+  }
+
   // Case à cocher d'un filtre, mémorisée dans ce navigateur.
   toggle(prop, key, label, title) {
     return el("label", { class: "muted filter", title },
@@ -463,7 +517,8 @@ class ProfilesPanel {
     const focused = document.activeElement === this.search;
     const { selectionStart, selectionEnd } = this.search;
     this.root.replaceChildren(
-      this.editing ? this.renderEditor() : this.uninstall ? this.renderUninstall() : this.renderMain());
+      this.editing ? this.renderEditor() : this.settings ? this.renderSettings()
+        : this.uninstall ? this.renderUninstall() : this.renderMain());
     if (focused && this.search.isConnected) {
       this.search.focus();
       this.search.setSelectionRange(selectionStart, selectionEnd);
@@ -527,10 +582,71 @@ class ProfilesPanel {
     );
   }
 
+  // Réglages des téléchargements : valeur enregistrée, sinon celle de l'environnement, sinon le
+  // défaut (voir DOWNLOAD_SETTINGS dans comfy_profiles.py).
+  renderSettings() {
+    const s = this.settings;
+    const locked = !!this.data?.readonly;
+    // D'où vient la valeur affichée, quand elle n'est pas enregistrée.
+    const origin = (key) => key in s.saved ? null
+      : el("span", { class: "muted" }, s.env[key] ? t("(d'après {var})", { var: s.env[key] }) : t("(défaut)"));
+    const jobs = el("input", { type: "number", class: "num", min: 1, max: s.max_jobs, step: 1,
+                               value: s.values.jobs, disabled: locked });
+    const hfPerf = el("input", { type: "checkbox", checked: s.values.hf_high_performance, disabled: locked });
+    const save = () => {
+      const wanted = { jobs: Number(jobs.value), hf_high_performance: hfPerf.checked };
+      const values = Object.fromEntries(Object.entries(wanted)
+        .filter(([key, value]) => key in s.saved || value !== s.values[key]));
+      if (Object.keys(values).length) this.saveSettings(values);
+      else { this.settings = null; this.render(); }
+    };
+    const { count, size } = s.partials;
+    return el("div", { style: "display:flex;flex-direction:column;gap:8px" },
+      el("h3", {}, t("Configuration")),
+      el("div", { class: "muted" }, s.file),
+      locked && el("div", { class: "warn" }, t("Lecture seule (COMFY_PROFILES_READONLY) : réglages non modifiables.")),
+      el("h4", {}, t("Téléchargements")),
+      el("label", { class: "field" }, t("Fichiers téléchargés à la fois"), jobs, origin("jobs")),
+      el("div", { class: "muted" },
+        t("Modèles et workflows, de 1 à {max} ; les custom nodes et paquets pip passent avant, un à un.",
+          { max: s.max_jobs })),
+      el("label", { class: "field", style: "flex-wrap:nowrap" }, hfPerf,
+        el("span", {}, t("Hugging Face : mode haute performance (Xet)"), " ", origin("hf_high_performance"))),
+      el("div", { class: "muted" },
+        t("Plus de connexions et de mémoire pour chaque fichier (HF_XET_HIGH_PERFORMANCE).")),
+      s.hf_xet
+        ? el("div", { class: "muted" }, `huggingface_hub ${s.huggingface_hub ?? "?"} · hf_xet ${s.hf_xet}`)
+        : el("div", { class: "warn" },
+          t("hf_xet absent : Hugging Face télécharge sans Xet, plus lentement (pip install hf_xet).")),
+      el("div", { class: "muted" },
+        t("Un téléchargement CivitAI, GitHub, URL ou Google Drive interrompu reprend où il en était ; " +
+          "Hugging Face repart de zéro (huggingface_hub ne sait pas reprendre).")),
+      el("h4", {}, t("Téléchargements partiels")),
+      el("div", { class: "bar" },
+        el("span", { class: "muted" }, count
+          ? t("{n} fichier(s), {size}, repris par la prochaine synchronisation", { n: count, size: humanSize(size) })
+          : t("Aucun")),
+        count > 0 && el("button", {
+          disabled: locked || this.sync.running, onclick: () => this.cleanPartials(),
+          title: t("Supprime les fichiers .part et le dossier de staging (pas pendant une action)"),
+        }, t("Supprimer"))),
+      this.settingsError && el("div", { class: "error" }, this.settingsError),
+      el("div", { class: "bar" },
+        el("button", { class: "primary", disabled: locked, onclick: save }, t("Enregistrer")),
+        el("button", { onclick: () => { this.settings = null; this.render(); } }, t("Annuler")),
+        Object.keys(s.saved).length > 0 && el("button", { disabled: locked, onclick: () => this.resetSettings() },
+          t("Valeurs par défaut"))),
+      el("div", { class: "muted" },
+        t("Les réglages s'appliquent aux synchronisations suivantes, depuis le panneau comme au démarrage du conteneur.")),
+    );
+  }
+
   renderMain() {
     const running = this.sync.running;
     const header = el("div", {},
-      el("h3", {}, t("Profils")),
+      el("div", { class: "head" },
+        el("h3", { style: "flex:1" }, t("Profils")),
+        iconButton("pi-cog", t("Configuration"), false, () => this.openSettings())),
       this.data && el("div", { class: "muted", title: this.data.config },
         `${SOURCES[this.data.source] ? t(SOURCES[this.data.source]) : this.data.source} : ${this.data.config}`),
       this.data?.readonly && el("div", { class: "warn" },

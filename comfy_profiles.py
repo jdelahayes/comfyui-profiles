@@ -8,9 +8,10 @@ Usage:
   comfy_profiles.py [--config FICHIER] list [--json]
   comfy_profiles.py [--config FICHIER] where
   comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
-  comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--dry-run]
+  comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--jobs N] [--dry-run]
   comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
   comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
+  comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials] [--json]
 
 Fichier de profils, le premier trouvé :
   1. --config FICHIER
@@ -26,8 +27,16 @@ un fichier ne change pas), paquets pip (--upgrade). Un custom node modifié sur 
 --with-extends : aussi ceux des profils dont ils héritent), sauf ceux dont a encore besoin un
 autre profil installé (voir plan_uninstall) et ceux que le gestionnaire n'a pas installés
 lui-même (voir Manifest). Les paquets pip restent dans le venv.
-Ctrl+C (SIGINT) interrompt proprement `sync` : le téléchargement ou le clone en cours est
-abandonné sans laisser de fichier incomplet, la prochaine synchro le reprendra.
+Téléchargements : les modèles et workflows sont téléchargés plusieurs à la fois (--jobs, sinon
+le réglage `jobs`, voir `settings`), les custom nodes et paquets pip avant, un à un. Un
+téléchargement CivitAI, GitHub, URL ou Drive interrompu laisse un fichier .part, repris où il
+en était par la synchro suivante ; une coupure réseau est reprise aussitôt. Hugging Face passe
+par huggingface_hub (Xet), qui repart de zéro.
+Ctrl+C (SIGINT) interrompt `sync` : le clone en cours est abandonné sans laisser de dossier
+incomplet, les téléchargements laissent leur .part.
+`settings` : réglages des téléchargements, dans <user>/__comfy_profiles/settings.json (édités
+par le panneau, voir DOWNLOAD_SETTINGS), et téléchargements partiels (--clean-partials : les
+supprime). Résultat en JSON.
 --json (list, show, uninstall) : résultat en JSON sur stdout, messages d'information sur stderr (utilisé
 par le panneau Profils dans ComfyUI, voir __init__.py).
 
@@ -46,9 +55,14 @@ custom nodes sont déjà sur un volume persistant.
 Langue des messages : $COMFY_PROFILES_LANG, sinon $LC_ALL, $LC_MESSAGES ou $LANG (en, fr).
 """
 import argparse
+import collections
+import concurrent.futures
 import contextlib
+import errno
 import functools
 import hashlib
+import http.client
+import importlib.metadata
 import inspect
 import json
 import os
@@ -56,6 +70,9 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -72,12 +89,15 @@ DATA_DIR_NAME = "__comfy_profiles"
 CONFIG_NAME = "profiles.json"
 MANIFEST_NAME = "installed.json"
 VERSIONS_NAME = "versions.json"
+SETTINGS_NAME = "settings.json"
 SECTIONS = ("custom_nodes", "pip", "models", "workflows")
 # "size" : total calculé par profile_sizes.py (informatif, ignoré par sync).
 PROFILE_KEYS = {"description", "size", "extends", *SECTIONS}
 SOURCES = ("hf", "github", "url", "civitai")
 # Cloudflare (devant civitai.com notamment) rejette le User-Agent par défaut de urllib.
 USER_AGENT = "comfyui-profiles"
+# Téléchargements HTTP (CivitAI, GitHub, URL, Drive) : reprises après une coupure réseau.
+HTTP_RETRIES = 5
 # Dans le venv, donc propre à ce conteneur : un nouveau conteneur réinstalle les dépendances.
 MARKER_DIR = Path(sys.prefix) / ".comfy-profiles"
 
@@ -389,80 +409,270 @@ def describe_source(item):
     return item["url"]
 
 
-def progress_class():
-    """Barre de progression tqdm toujours affichée. Sans terminal (panneau, logs du conteneur),
-    tqdm et huggingface_hub la masquent d'office : le téléchargement d'un gros fichier ne
-    montrerait rien pendant des minutes. Une mise à jour par seconde au plus ; le panneau
-    réécrit la ligne à chaque \r. Une seule barre à la fois, sur une seule ligne : la première
-    ouverte (huggingface_hub en ouvre deux pour Xet, la reconstruction du fichier en premier,
-    avec le pourcentage). None si tqdm n'est pas installé."""
+# Sortie partagée par les téléchargements en parallèle (voir out et Progress).
+_output_lock = threading.RLock()
+# Ctrl+C pendant les téléchargements en parallèle : ceux en HTTP s'arrêtent au bloc suivant.
+CANCEL = threading.Event()
+# Fichier en cours de téléchargement dans ce thread (nom affiché par la progression Hugging Face).
+_current = threading.local()
+
+
+class Progress:
+    """Une seule ligne de progression pour tous les téléchargements en cours : pourcentage et
+    taille cumulés, débit (moyenne sur les dernières secondes), noms des fichiers. Une mise à
+    jour par seconde au plus, réécrite avec \\r : le panneau remplace alors la ligne. Plusieurs
+    barres tqdm à la fois seraient illisibles dans le panneau, et tqdm comme huggingface_hub les
+    masquent d'office sans terminal (panneau, logs du conteneur)."""
+
+    INTERVAL = 1.0
+    WINDOW = 5.0
+    NAMES_WIDTH = 80
+
+    def __init__(self):
+        self.tasks = {}  # id -> [nom, octets écrits, total ou None]
+        self.next_id = 0
+        self.shown = 0  # longueur de la ligne affichée, 0 si aucune
+        self.last = 0.0
+        self.received = 0  # octets écrits depuis le début, tous fichiers confondus
+        self.samples = collections.deque()  # (instant, received)
+
+    def start(self, name, total=None, done=0):
+        with _output_lock:
+            self.next_id += 1
+            self.tasks[self.next_id] = [name, done, total]
+            return self.next_id
+
+    def update(self, task, done, total=None):
+        with _output_lock:
+            entry = self.tasks.get(task)
+            if entry is None:
+                return
+            self.received += max(0, done - entry[1])
+            entry[1] = done
+            entry[2] = total or entry[2]
+            self.render()
+
+    def finish(self, task):
+        with _output_lock:
+            self.tasks.pop(task, None)
+            if not self.tasks:
+                self.clear()
+
+    def clear(self):
+        """Efface la ligne de progression, avant d'écrire autre chose."""
+        if self.shown:
+            sys.stdout.write("\r" + " " * self.shown + "\r")
+            sys.stdout.flush()
+            self.shown = 0
+            self.last = 0.0  # réaffichée dès la mise à jour suivante
+
+    def render(self):
+        now = time.monotonic()
+        if not self.tasks or now - self.last < self.INTERVAL:
+            return
+        self.last = now
+        self.samples.append((now, self.received))
+        while now - self.samples[0][0] > self.WINDOW:
+            self.samples.popleft()
+        since, before = self.samples[0]
+        rate = (self.received - before) / (now - since) if now > since else 0
+        tasks = list(self.tasks.values())
+        done = sum(task[1] for task in tasks)
+        totals = [task[2] for task in tasks]
+        parts = [tasks[0][0] if len(tasks) == 1 else t("{n} fichiers", n=len(tasks))]
+        if all(totals):
+            total = sum(totals)
+            parts.append(f"{done * 100 // total}% {human_size(done)}/{human_size(total)}")
+        else:
+            parts.append(human_size(done))
+        if rate:
+            parts.append(t("{size}/s", size=human_size(int(rate))))
+        if len(tasks) > 1:
+            names = ", ".join(task[0] for task in tasks)
+            parts.append(names if len(names) <= self.NAMES_WIDTH else names[:self.NAMES_WIDTH - 1] + "…")
+        line = "   ↓ " + " · ".join(parts)
+        sys.stdout.write("\r" + line.ljust(self.shown))
+        sys.stdout.flush()
+        self.shown = len(line)
+
+
+PROGRESS = Progress()
+
+
+def out(text="", err=False):
+    """print() qui efface d'abord la ligne de progression des téléchargements."""
+    with _output_lock:
+        PROGRESS.clear()
+        print(text, file=sys.stderr if err else sys.stdout, flush=True)
+
+
+class _Discard:
+    def write(self, _text):
+        pass
+
+    def flush(self):
+        pass
+
+
+@functools.cache
+def hub_progress_class():
+    """Classe tqdm passée à hf_hub_download : elle alimente PROGRESS au lieu d'afficher une
+    barre. Pour Xet, huggingface_hub en ouvre deux par fichier : seule compte la première
+    ouverte dans le thread, la reconstruction du fichier (octets écrits, avec le total). None
+    sans tqdm."""
     try:
         from tqdm import tqdm
     except ImportError:
         return None
 
-    class Progress(tqdm):
-        active = False
-
+    class HubProgress(tqdm):
         def __init__(self, *args, **kwargs):
-            kwargs.pop("disable", None)
-            kwargs.pop("position", None)  # pas de déplacement du curseur (\x1b[A)
+            for key in ("disable", "position", "name", "file"):
+                kwargs.pop(key, None)
             kwargs.setdefault("mininterval", 1)
-            kwargs.setdefault("ncols", 100)
-            self.owner = not Progress.active
-            Progress.active = True
-            super().__init__(*args, disable=not self.owner, **kwargs)
+            super().__init__(*args, file=_Discard(), **kwargs)
+            self.task = None
+            if not getattr(_current, "busy", False):
+                _current.busy = True
+                self.task = PROGRESS.start(getattr(_current, "name", "?"), self.total, self.n)
+
+        def update(self, n=1):
+            displayed = super().update(n)
+            if self.task:
+                PROGRESS.update(self.task, self.n, self.total)
+            return displayed
 
         def close(self):
+            if getattr(self, "task", None):
+                PROGRESS.finish(self.task)
+                self.task = None
+                _current.busy = False
             super().close()
-            if getattr(self, "owner", False):
-                self.owner = Progress.active = False
 
-    return Progress
+    return HubProgress
+
+
+class IncompleteDownload(Exception):
+    pass
+
+
+def retryable(error):
+    """Erreur passagère d'un téléchargement HTTP, qui vaut d'être reprise aussitôt."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code >= 500 or error.code == 429
+    if isinstance(error, OSError) and error.errno in (errno.ENOSPC, errno.EDQUOT, errno.EACCES, errno.EROFS):
+        return False
+    return isinstance(error, (OSError, http.client.HTTPException, IncompleteDownload))
+
+
+def part_info(part):
+    """Version à la source du contenu d'un .part, notée à côté (en caché, et pas en .json :
+    le dossier des workflows liste les .json)."""
+    return part.with_name(f".{part.name}-info")
+
+
+def response_validator(headers):
+    """Valeur If-Range d'une réponse : ETag fort, sinon Last-Modified, sinon None."""
+    etag = headers.get("ETag")
+    if etag and not etag.startswith("W/"):
+        return etag
+    return headers.get("Last-Modified")
+
+
+def fetch_part(url, part, task):
+    """Une tentative de téléchargement de `url` dans `part`, à la suite de ce qu'il contient
+    déjà si le serveur accepte les requêtes partielles (Range) et que le fichier n'a pas
+    changé à la source (If-Range) ; sinon depuis le début."""
+    info = part_info(part)
+    offset = part.stat().st_size if part.exists() else 0
+    validator = info.read_text().strip() if offset and info.is_file() else None
+    headers = {"User-Agent": USER_AGENT}
+    if offset and validator:
+        headers |= {"Range": f"bytes={offset}-", "If-Range": validator}
+    try:
+        resp = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60)
+    except urllib.error.HTTPError as e:
+        if e.code == 416 and offset:  # .part plus long que le fichier : on repart de zéro
+            part.unlink()
+            return fetch_part(url, part, task)
+        raise
+    with resp:
+        match = re.fullmatch(r"bytes (\d+)-\d+/(\d+)", resp.headers.get("Content-Range") or "")
+        if resp.status == 206 and match and int(match[1]) == offset:
+            mode, total = "ab", int(match[2])
+        else:  # tout le fichier : pas de reprise possible, ou il a changé à la source
+            offset, mode = 0, "wb"
+            total = int(resp.headers.get("Content-Length") or 0) or None
+            validator = response_validator(resp.headers)
+            if validator:
+                info.write_text(validator + "\n")
+            else:
+                info.unlink(missing_ok=True)
+        done = offset
+        PROGRESS.update(task, done, total)
+        with part.open(mode) as out_file:
+            while chunk := resp.read(1024 * 1024):
+                if CANCEL.is_set():
+                    raise KeyboardInterrupt
+                out_file.write(chunk)
+                done += len(chunk)
+                PROGRESS.update(task, done, total)
+    if total and done != total:
+        raise IncompleteDownload(t("téléchargement incomplet ({done} sur {total} octets)", done=done, total=total))
 
 
 def fetch_url(url, dest):
+    """Télécharge `url` dans `dest`, via `dest`.part. Un .part laissé par un téléchargement
+    interrompu (arrêt, coupure, conteneur arrêté) est repris où il en était (voir fetch_part) ;
+    une coupure en cours de route est reprise aussitôt, jusqu'à HTTP_RETRIES fois."""
     part = dest.with_name(dest.name + ".part")
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    task = PROGRESS.start(dest.name)
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp, part.open("wb") as out:
-            bar_class = progress_class()
-            total = int(resp.headers.get("Content-Length") or 0) or None
-            bar = bar_class(total=total, unit="B", unit_scale=True, unit_divisor=1024,
-                            desc=dest.name) if bar_class else None
+        for attempt in range(HTTP_RETRIES + 1):
             try:
-                while chunk := resp.read(1024 * 1024):
-                    out.write(chunk)
-                    if bar:
-                        bar.update(len(chunk))
-            finally:
-                if bar:
-                    bar.close()
+                fetch_part(url, part, task)
+                break
+            except Exception as e:
+                if attempt == HTTP_RETRIES or not retryable(e):
+                    raise
+                delay = min(2 ** attempt, 30)
+                out("   " + t("{name} : {error}, nouvel essai dans {delay} s", name=dest.name, error=e, delay=delay))
+                if CANCEL.wait(delay):
+                    raise KeyboardInterrupt
         part.replace(dest)
+        part_info(part).unlink(missing_ok=True)
     finally:
-        part.unlink(missing_ok=True)
+        PROGRESS.finish(task)
+        if part.exists() and not part.stat().st_size:
+            part.unlink()
 
 
 def fetch(item, dest, paths):
     dest.parent.mkdir(parents=True, exist_ok=True)
+    _current.name, _current.busy = dest.name, False
     if "hf" in item:
         from huggingface_hub import hf_hub_download  # lit HF_TOKEN tout seul
 
-        paths.staging.mkdir(parents=True, exist_ok=True)
+        # Un dossier par fichier : plusieurs téléchargements tournent en même temps. Vidé avant
+        # (reste d'un téléchargement tué : huggingface_hub ne sait pas le reprendre) et après.
+        key = hashlib.sha256(describe_source(item).encode()).hexdigest()[:12]
+        work = paths.staging / f"hf-{key}"
+        shutil.rmtree(work, ignore_errors=True)
+        work.mkdir(parents=True)
         options = {}
-        if "tqdm_class" in inspect.signature(hf_hub_download).parameters and progress_class():
-            options["tqdm_class"] = progress_class()
+        if "tqdm_class" in inspect.signature(hf_hub_download).parameters and hub_progress_class():
+            options["tqdm_class"] = hub_progress_class()
         try:
             downloaded = hf_hub_download(
                 repo_id=item["hf"],
                 filename=item["file"],
                 revision=item.get("revision"),
-                local_dir=paths.staging,
+                local_dir=work,
                 **options,
             )
             shutil.move(downloaded, dest)
         finally:
-            shutil.rmtree(paths.staging, ignore_errors=True)
+            shutil.rmtree(work, ignore_errors=True)
     elif "civitai" in item:
         url = f"https://civitai.com/api/download/models/{item['civitai']}"
         # Token en paramètre plutôt qu'en en-tête : CivitAI redirige vers un stockage S3 qui
@@ -481,10 +691,11 @@ class Versions:
     """Version à la source de chaque modèle ou workflow téléchargé ou vérifié, dans
     <user>/__comfy_profiles/versions.json. Une entrée ne vaut que tant que le fichier local n'a
     pas changé (même taille, même date) : elle évite de recalculer l'empreinte d'un gros modèle
-    à chaque `sync --update`."""
+    à chaque `sync --update`. Écrit depuis plusieurs téléchargements à la fois : verrouillé."""
 
     def __init__(self, paths):
         self.file = paths.data / VERSIONS_NAME
+        self.lock = threading.Lock()
         try:
             self.items = json.loads(self.file.read_text())
         except (OSError, json.JSONDecodeError):
@@ -502,11 +713,12 @@ class Versions:
 
     def set(self, path, remote):
         st = path.stat()
-        self.items[str(path)] = {"remote": remote, "size": st.st_size, "mtime": st.st_mtime_ns}
-        self.file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.file.with_name(f".{self.file.name}.tmp")
-        tmp.write_text(json.dumps(self.items, ensure_ascii=False, indent=1) + "\n")
-        tmp.replace(self.file)
+        with self.lock:
+            self.items[str(path)] = {"remote": remote, "size": st.st_size, "mtime": st.st_mtime_ns}
+            self.file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.file.with_name(f".{self.file.name}.tmp")
+            tmp.write_text(json.dumps(self.items, ensure_ascii=False, indent=1) + "\n")
+            tmp.replace(self.file)
 
 
 def remote_version(item):
@@ -565,19 +777,19 @@ def refresh_file(item, dest, paths, versions):
     elif size is not None and size != dest.stat().st_size:
         changed = True
     elif "hf" in item and version:
-        print("   " + t("calcul de l'empreinte de {name}", name=dest.name), flush=True)
+        out("   " + t("calcul de l'empreinte de {name}", name=dest.name))
         changed = hf_local_etag(dest, version) not in (None, version)
     else:
         changed = bool(version and known and known != version)
     if not changed:
         if version:
             versions.set(dest, version)
-        print("   " + t("déjà à jour"))
+        out("   " + t("{name} : déjà à jour", name=dest.name))
         return
     fetch(item, dest, paths)
     if version:
         versions.set(dest, version)
-    print("   " + t("mis à jour"))
+    out("   " + t("{name} : mis à jour", name=dest.name))
 
 
 def locally_modified(store):
@@ -628,12 +840,16 @@ def touch(path):
 # --- Plan ---------------------------------------------------------------------------------
 
 class Step:
-    """`record` : (chemin, genre) à inscrire au manifeste une fois l'étape réussie."""
+    """`record` : (chemin, genre) à inscrire au manifeste une fois l'étape réussie. `parallel` :
+    téléchargement ou vérification d'un fichier, `name`, menés plusieurs à la fois (voir
+    run_steps)."""
 
-    def __init__(self, label, run, record=None):
+    def __init__(self, label, run, record=None, name=None, parallel=False):
         self.label = label
         self.run = run
         self.record = record
+        self.name = name or label
+        self.parallel = parallel
 
 
 class Manifest:
@@ -711,10 +927,11 @@ def plan_file(item, dest, kind, paths, versions, update=False, managed=False):
             fetch(item, dest, paths)
             remember_version(item, dest, versions)
 
-        return Step(f"{describe_source(item)} -> {dest}", install, record=(dest, kind))
+        return Step(f"{describe_source(item)} -> {dest}", install, record=(dest, kind),
+                    name=dest.name, parallel=True)
     if update and managed and "civitai" not in item:
         return Step(t("{source} : vérification de {path}", source=describe_source(item), path=dest),
-                    lambda: refresh_file(item, dest, paths, versions))
+                    lambda: refresh_file(item, dest, paths, versions), name=dest.name, parallel=True)
     return None
 
 
@@ -794,11 +1011,10 @@ def gdrive_marker(store):
 def install_gdrive_zip(file_id, store, paths, update=False):
     """Télécharge un zip public sur Drive et l'extrait dans `store` (remplacé s'il existe).
     `update` : laisse `store` tel quel si le zip est celui dont il provient déjà."""
-    paths.staging.mkdir(parents=True, exist_ok=True)
     work = paths.staging / f"gdrive-{file_id}"
+    archive = work / "node.zip"
+    work.mkdir(parents=True, exist_ok=True)
     try:
-        archive = work / "node.zip"
-        work.mkdir()
         # confirm=t : saute la page d'avertissement « fichier trop gros pour l'antivirus ».
         fetch_url(f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
                   archive)
@@ -826,7 +1042,11 @@ def install_gdrive_zip(file_id, store, paths, update=False):
         if update:
             print("   " + t("mis à jour"))
     finally:
-        shutil.rmtree(paths.staging, ignore_errors=True)
+        # Ne reste qu'un téléchargement interrompu (node.zip.part), repris la fois suivante.
+        shutil.rmtree(work / "extracted", ignore_errors=True)
+        archive.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            work.rmdir()
 
 
 def custom_node_name(item, where):
@@ -1089,6 +1309,137 @@ def build_plan(merged, paths, manifest, update=False):
     return steps, status
 
 
+# --- Réglages -----------------------------------------------------------------------------
+
+# Réglages des téléchargements, dans <user>/__comfy_profiles/settings.json (édités par le
+# panneau) : {"downloads": {clé: valeur}}. Valeur enregistrée, sinon variable d'environnement,
+# sinon défaut.
+#   jobs                 fichiers (modèles, workflows) téléchargés à la fois
+#   hf_high_performance  Hugging Face : mode haute performance de Xet (HF_XET_HIGH_PERFORMANCE)
+DOWNLOAD_SETTINGS = {
+    "jobs": ("COMFY_PROFILES_JOBS", 3),
+    "hf_high_performance": ("HF_XET_HIGH_PERFORMANCE", True),
+}
+MAX_JOBS = 16
+
+
+def parse_setting(key, value):
+    """Valeur valide du réglage `key` (texte d'une variable d'environnement accepté), sinon
+    ConfigError."""
+    if key == "jobs":
+        try:
+            jobs = int(value) if isinstance(value, str) or type(value) is int else None
+        except ValueError:
+            jobs = None
+        if jobs is None or not 1 <= jobs <= MAX_JOBS:
+            raise ConfigError(t("jobs : entier de 1 à {max} attendu", max=MAX_JOBS))
+        return jobs
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    if not isinstance(value, bool):
+        raise ConfigError(t("{key} : true ou false attendu", key=key))
+    return value
+
+
+def saved_settings(paths):
+    try:
+        data = json.loads((paths.data / SETTINGS_NAME).read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    downloads = data.get("downloads") if isinstance(data, dict) else None
+    return {k: v for k, v in (downloads or {}).items() if k in DOWNLOAD_SETTINGS} if isinstance(downloads, dict) else {}
+
+
+def download_settings(paths):
+    """{clé: valeur} des réglages en vigueur ; une valeur invalide (fichier ou variable) est
+    ignorée."""
+    saved = saved_settings(paths)
+    values = {}
+    for key, (var, default) in DOWNLOAD_SETTINGS.items():
+        values[key] = default
+        for value in (os.environ.get(var), saved.get(key)):
+            if value is not None:
+                with contextlib.suppress(ConfigError):
+                    values[key] = parse_setting(key, value)
+    return values
+
+
+def apply_download_settings(values):
+    """Avant tout import de huggingface_hub : hf_xet lit son mode au démarrage."""
+    os.environ["HF_XET_HIGH_PERFORMANCE"] = "1" if values["hf_high_performance"] else "0"
+
+
+def package_version(*names):
+    for name in names:
+        with contextlib.suppress(importlib.metadata.PackageNotFoundError):
+            return importlib.metadata.version(name)
+    return None
+
+
+def partial_downloads(paths):
+    """Téléchargements interrompus : fichiers .part (repris par la prochaine synchro, voir
+    fetch_url) et restes du dossier de staging."""
+    roots = {paths.models, paths.workflows,
+             *(Path(folder) for folders in paths.model_folders.values() for folder in folders)}
+    found = set()
+    for root in roots:
+        if root.is_dir():
+            found.update(p for p in root.rglob("*.part") if p.is_file())
+    if paths.staging.is_dir():
+        found = {p for p in found if paths.staging not in p.parents} | set(paths.staging.iterdir())
+    return sorted(found)
+
+
+def cmd_settings(args):
+    paths = Paths()
+    file = paths.data / SETTINGS_NAME
+    if args.reset:
+        file.unlink(missing_ok=True)
+    if args.set:
+        try:
+            changes = json.loads(args.set)
+            if not isinstance(changes, dict):
+                raise ConfigError(t("objet JSON attendu"))
+            saved = saved_settings(paths)
+            for key, value in changes.items():
+                if key not in DOWNLOAD_SETTINGS:
+                    raise ConfigError(t("réglage inconnu : {key}", key=key))
+                if value is None:
+                    saved.pop(key, None)
+                else:
+                    saved[key] = parse_setting(key, value)
+        except (json.JSONDecodeError, ConfigError) as e:
+            sys.exit(f"!! {e}")
+        file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = file.with_name(f".{file.name}.tmp")
+        tmp.write_text(json.dumps({"downloads": saved}, ensure_ascii=False, indent=1) + "\n")
+        tmp.replace(file)
+    removed = None
+    if args.clean_partials:
+        partials = partial_downloads(paths)
+        removed = {"count": len(partials), "size": sum(disk_size(p) for p in partials)}
+        for path in partials:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+                part_info(path).unlink(missing_ok=True)
+    partials = partial_downloads(paths)
+    print_json({
+        "file": str(file),
+        "values": download_settings(paths),
+        "saved": saved_settings(paths),
+        "defaults": {key: default for key, (_, default) in DOWNLOAD_SETTINGS.items()},
+        "env": {key: f"{var}={os.environ[var]}" for key, (var, _) in DOWNLOAD_SETTINGS.items()
+                if os.environ.get(var) is not None},
+        "max_jobs": MAX_JOBS,
+        "huggingface_hub": package_version("huggingface_hub", "huggingface-hub"),
+        "hf_xet": package_version("hf-xet", "hf_xet"),
+        "partials": {"count": len(partials), "size": sum(disk_size(p) for p in partials)},
+        **({"removed": removed} if removed else {}),
+    })
+
+
 # --- Commandes ----------------------------------------------------------------------------
 
 def print_json(data):
@@ -1286,6 +1637,58 @@ def cmd_show(profiles, args):
     print("\n".join(lines) or t("(profil vide)"))
 
 
+def run_steps(steps, manifest, jobs, finished):
+    """Exécute le plan : d'abord, une à une, les étapes qui ne sont pas des téléchargements
+    (custom nodes, pip : leur sortie, celle de git et de pip, ne se mélange pas), puis les
+    téléchargements et vérifications de fichiers, `jobs` à la fois. Une étape ratée ne bloque
+    pas les suivantes. `finished` reçoit les étapes terminées ; renvoie les libellés de celles
+    ratées. Ctrl+C pendant les téléchargements : ceux en HTTP s'arrêtent (CANCEL), on attend
+    un peu, puis KeyboardInterrupt."""
+    total = len(steps)
+    numbered = list(enumerate(steps, 1))
+    failures = []
+
+    def done(i, step, error):
+        finished.append(step)
+        if error is not None:
+            out(f"!! ({i}/{total}) " + t("Échec : {error}", error=error), err=True)
+            failures.append(step.label)
+        elif step.record:
+            manifest.add(*step.record)
+            manifest.save()
+
+    for i, step in (n for n in numbered if not n[1].parallel):
+        out(f">> ({i}/{total}) {step.label}")
+        try:
+            step.run()
+        except Exception as e:
+            done(i, step, e)
+        else:
+            done(i, step, None)
+
+    def run(i, step):
+        out(f">> ({i}/{total}) {step.label}")
+        step.run()
+
+    downloads = [n for n in numbered if n[1].parallel]
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="download")
+    futures = {pool.submit(run, i, step): (i, step) for i, step in downloads}
+    try:
+        for future in concurrent.futures.as_completed(futures):
+            i, step = futures[future]
+            done(i, step, future.exception())
+            if future.exception() is None and jobs > 1 and len(downloads) > 1:
+                out(f">> ({i}/{total}) " + t("terminé : {name}", name=step.name))
+    except KeyboardInterrupt:
+        CANCEL.set()
+        pool.shutdown(wait=False, cancel_futures=True)
+        # Seulement ceux qui tournaient : wait() ne voit jamais finir un futur annulé ainsi.
+        concurrent.futures.wait([f for f in futures if not f.cancelled()], timeout=5)
+        raise
+    pool.shutdown()
+    return failures
+
+
 def cmd_sync(profiles, args):
     names = split_names(args.profiles or os.environ.get("COMFY_PROFILES"))
     if not names:
@@ -1315,22 +1718,25 @@ def cmd_sync(profiles, args):
                         path=manifest.file, n=len(manifest.items)))
     print(">> " + (t("HF_TOKEN détecté.") if os.environ.get("HF_TOKEN")
                    else t("Pas de HF_TOKEN : téléchargements HF anonymes.")))
+    settings = download_settings(paths)
+    apply_download_settings(settings)
+    jobs = args.jobs or settings["jobs"]
+    if any(step.parallel for step in steps):
+        print(">> " + t("Téléchargements : {n} à la fois", n=jobs) +
+              (", " + t("Hugging Face en mode haute performance") if settings["hf_high_performance"] else ""),
+              flush=True)
 
-    failures = []
-    for i, step in enumerate(steps, 1):
-        print(f">> ({i}/{len(steps)}) {step.label}", flush=True)
-        try:
-            step.run()
-            if step.record:
-                manifest.add(*step.record)
-                manifest.save()
-        except KeyboardInterrupt:
-            print("!! " + t("Synchronisation interrompue ({done}/{total} action(s) faite(s)).",
-                            done=i - 1, total=len(steps)), file=sys.stderr)
+    finished = []
+    try:
+        failures = run_steps(steps, manifest, jobs, finished)
+    except KeyboardInterrupt:
+        out("!! " + t("Synchronisation interrompue ({done}/{total} action(s) faite(s)).",
+                      done=len(finished), total=len(steps)), err=True)
+        if not CANCEL.is_set():
             return 130
-        except Exception as e:  # une étape ratée ne doit pas bloquer les suivantes
-            print("!! " + t("Échec : {error}", error=e), file=sys.stderr)
-            failures.append(step.label)
+        # Un téléchargement Hugging Face ne s'interrompt pas de l'extérieur : on quitte sans
+        # attendre les threads qui le mènent.
+        os._exit(130)
 
     if failures:
         print("!! " + t("{n} échec(s) sur {total} :", n=len(failures), total=len(steps)), file=sys.stderr)
@@ -1610,6 +2016,8 @@ def main():
     sync.add_argument("--update", action="store_true",
                       help=t("met aussi à jour ce que le gestionnaire a installé ou pris en charge, "
                              "s'il a changé à la source"))
+    sync.add_argument("--jobs", type=int, choices=range(1, MAX_JOBS + 1), metavar="N",
+                      help=t("fichiers téléchargés à la fois (défaut : réglage jobs, voir settings)"))
     adopt = sub.add_parser("adopt", help=t("prend en charge ce qui est déjà présent pour des profils "
                                            "(uninstall pourra le supprimer)"))
     adopt.add_argument("profiles")
@@ -1621,9 +2029,19 @@ def main():
     uninstall.add_argument("--with-extends", action="store_true",
                            help=t("désinstalle aussi les profils dont ils héritent (extends)"))
     uninstall.add_argument("--json", action="store_true", help=t("sortie JSON (implique --dry-run)"))
+    settings = sub.add_parser("settings", help=t("réglages des téléchargements et téléchargements partiels (JSON)"))
+    settings.add_argument("--set", metavar="JSON",
+                          help=t("réglages à enregistrer, ex. '{\"jobs\": 4}' (null : revient au défaut)"))
+    settings.add_argument("--reset", action="store_true", help=t("revient aux réglages par défaut"))
+    settings.add_argument("--clean-partials", action="store_true",
+                          help=t("supprime les téléchargements partiels (pas pendant une synchro)"))
+    settings.add_argument("--json", action="store_true", help=t("sortie JSON (toujours)"))
     args = parser.parse_args()
     if args.command == "where":
         print_json(config_location(args.config))
+        return
+    if args.command == "settings":
+        cmd_settings(args)
         return
 
     path, source = config_source(args.config)

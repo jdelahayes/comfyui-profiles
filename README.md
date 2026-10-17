@@ -250,14 +250,17 @@ rester telles quelles. Un message absent reste en français.
   icône qui ouvre sa source (Hugging Face, GitHub, CivitAI, Google Drive, PyPI ou l'URL).
 - Synchronisation, dry-run, mise à jour (voir [Mise à jour](#mise-à-jour)) ou désinstallation
   des profils cochés, avec les logs en direct.
-  Une seule action à la fois ; **Arrêter** l'interrompt proprement (le téléchargement ou le
-  clone en cours est abandonné sans laisser de fichier incomplet).
+  Une seule action à la fois ; **Arrêter** l'interrompt (le clone en cours est abandonné sans
+  laisser de dossier incomplet ; les téléchargements gardent leur `.part`, voir
+  [Téléchargements](#téléchargements)).
 - Section **Ce workflow**, pour un workflow qui déclare ses profils : voir
   [Profils d'un workflow](#profils-dun-workflow).
 - Fichier de profils : édition, import (fichier ou URL), export, retour au modèle.
 - **Recalculer les tailles** : lance `profile_sizes.py` sur le fichier de profils (seuls les
   fichiers sans taille sont interrogés) ; **Tout recalculer** réinterroge aussi ceux dont la
   taille est connue (`--force`).
+- **Configuration** (engrenage à côté du titre) : réglages des téléchargements (voir
+  [Téléchargements](#téléchargements)) et suppression des téléchargements partiels.
 - Redémarrage de ComfyUI, nécessaire après l'installation de nouveaux custom nodes : même
   processus relancé, ou relance par comfy-cli quand ComfyUI tourne sous `comfy launch`.
 
@@ -265,15 +268,43 @@ Toute personne qui a accès à l'UI peut installer des profils, modifier leur fi
 redémarrer ComfyUI. Sur une instance partagée, `COMFY_PROFILES_READONLY=1` limite le panneau à
 la consultation et au dry-run.
 
+## Téléchargements
+
+- **En parallèle** : les modèles et workflows sont téléchargés plusieurs à la fois (3 par
+  défaut), une fois les custom nodes et paquets pip installés, un à un. Les logs montrent une
+  seule ligne de progression pour tous les fichiers en cours (pourcentage, taille, débit).
+- **Reprise** : un téléchargement CivitAI, GitHub, URL ou Google Drive interrompu (Arrêter,
+  coupure, conteneur arrêté) laisse un fichier `<nom>.part` (ignoré par ComfyUI), repris où il
+  en était par la synchronisation suivante, si le serveur accepte les requêtes partielles et
+  que le fichier n'a pas changé à la source (sinon il repart de zéro). Une coupure réseau en
+  cours de route est reprise aussitôt (5 essais). Hugging Face passe par `huggingface_hub`
+  (Xet), qui ne sait pas reprendre : un fichier interrompu repart de zéro.
+- **Hugging Face** : mode haute performance de Xet (`HF_XET_HIGH_PERFORMANCE`) activé par
+  défaut : plus de connexions et de mémoire par fichier.
+
+Réglages : panneau **Configuration**, ou `comfy_profiles.py settings`. Ils sont enregistrés dans
+`<user>/__comfy_profiles/settings.json` et valent pour toutes les synchronisations suivantes, y
+compris celle du démarrage d'un conteneur. Ordre de priorité : valeur enregistrée, sinon
+variable d'environnement, sinon défaut.
+
+| Réglage | Variable d'environnement | Défaut |
+|---|---|---|
+| `jobs` : fichiers téléchargés à la fois (1 à 16) | `COMFY_PROFILES_JOBS` | 3 |
+| `hf_high_performance` : mode haute performance de Xet | `HF_XET_HIGH_PERFORMANCE` | activé |
+
+Les téléchargements partiels restent sur le disque tant qu'ils ne sont pas repris : le panneau
+Configuration les compte et peut les supprimer (`settings --clean-partials`).
+
 ## Ligne de commande
 
 ```bash
 comfy_profiles.py [--config FICHIER] list [--json]
 comfy_profiles.py [--config FICHIER] where                    # fichier utilisé et son origine (JSON)
 comfy_profiles.py [--config FICHIER] show PROFIL[,PROFIL...] [--json]
-comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--dry-run]
+comfy_profiles.py [--config FICHIER] sync [PROFIL[,PROFIL...]] [--update] [--jobs N] [--dry-run]
 comfy_profiles.py [--config FICHIER] uninstall PROFIL[,PROFIL...] [--with-extends] [--dry-run] [--json]
 comfy_profiles.py [--config FICHIER] adopt PROFIL[,PROFIL...] [--dry-run] [--json]
+comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials]   # réglages (JSON)
 profile_sizes.py [--config FICHIER] [--env FICHIER] [--force] [--dry-run]
 ```
 
@@ -304,6 +335,8 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 | `COMFY_MODEL_FOLDERS` | dossiers de chaque type de modèle, en JSON (passés par le panneau) | dossiers par défaut + `extra_model_paths.yaml` |
 | `COMFY_EXTRA_MODEL_PATHS` | autres fichiers `extra_model_paths` (séparés par `:`), comme `--extra-model-paths-config` (ligne de commande) | — |
 | `HF_TOKEN`, `CIVITAI_TOKEN` | téléchargements authentifiés | — |
+| `COMFY_PROFILES_JOBS` | fichiers téléchargés à la fois, si le réglage `jobs` n'est pas enregistré | 3 |
+| `HF_XET_HIGH_PERFORMANCE` | `0` : désactive le mode haute performance de Xet, si le réglage n'est pas enregistré | activé |
 | `GDRIVE_ZIP_PASSWORD` | zips chiffrés des custom nodes `gdrive` | — |
 | `COMFY_PROFILES_SCRIPT` | autre `comfy_profiles.py` à utiliser par le panneau | celui de ce dépôt |
 
@@ -312,7 +345,7 @@ quand ils ne sont pas dans l'environnement. Il fonctionne aussi hors de tout Com
 Le minimum :
 
 ```dockerfile
-RUN git clone --branch v0.6.1 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
+RUN git clone --branch v0.7.0 --depth 1 https://github.com/jdelahayes/comfyui-profiles.git \
       "${COMFY_HOME}/custom_nodes/comfyui-profiles"
 COPY profiles.json /opt/profiles.json
 ENV COMFY_PROFILES_SEED=/opt/profiles.json
