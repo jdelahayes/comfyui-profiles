@@ -247,11 +247,12 @@ command line, `COMFY_PROFILES`, `extends`, Workflow profiles node):
 | `krea2-turbo[]` | only the common items |
 
 In the panel, a profile with variants keeps **one card**, with one chip per variant (its
-state color and its size, ★ for the default variant). Tick the chips the card's buttons apply
-to:
+state color and its size, ★ for the default variant). Click the chips the card's buttons apply
+to: none is ticked at first, and these buttons stay inactive until you tick one (same for the
+Sync, Dry-run, Update and Uninstall buttons under the list, for a checked profile).
 
-- **✓** ticked and already installed;
-- **⤓** (blue dashed border) ticked and not installed yet: the next sync installs it.
+- solid outline: ticked, and already installed (green dot);
+- **⤓** (blue dashed outline): ticked and not installed yet: the next sync installs it.
 
 The details (chevron button) group the items by variant. Each block takes the color of its
 own state. Below, `int8` and `bf16` are ticked and not fully installed: a sync of the card
@@ -310,23 +311,84 @@ delete them).
 
 ## 7. Sharing a workflow with its profiles
 
-Add a **Workflow profiles** node (*utils* category) to your workflow and fill in:
+A workflow can say which profiles it needs: whoever opens it sees what is missing and installs
+it in one click. And one workflow can serve every variant of a profile (int8, bf16…), the
+panel fixing its model fields for you.
 
-- **profiles**: the profiles it needs, comma-separated, e.g.
-  `krea2-styles[int8], flux2-klein-9b`;
+### Declare the profiles
+
+The **Workflow profiles** node (*utils* category) carries the declaration:
+
+![The Workflow profiles node](images/node-workflow-profiles.png)
+
+- **profiles**: the profiles the workflow needs, comma-separated, with their variants between
+  brackets, e.g. `flux3-klein[int8], flux2-klein-9b`;
 - **source** (optional): the URL of the profiles file that defines them, for instance a raw
-  GitHub link to your `profiles.json`.
+  GitHub link to your `profiles.json`, for those who do not have these profiles.
 
-The node is never executed and changes nothing in the result. It travels with the workflow.
-Whoever opens the workflow gets a notification if some profiles are missing, and the panel
-shows a **This workflow** section with their state:
+The node is never executed and changes nothing in the result: it only travels with the
+workflow.
 
-![The "This workflow" section and the Workflow profiles node](images/panel-workflow.png)
+You do not need to look for it in the node list. When the open workflow has no such node, the
+**This workflow** section of the panel says so:
+
+![A workflow without declared profiles](images/panel-no-declaration.png)
+
+- **+** adds the node, filled with the profiles ticked in the panel. It is placed in the
+  visible part of the canvas, without covering other nodes;
+- the second icon opens the check of the workflow's models (below), which can also fill the
+  node for you.
+
+### What whoever opens the workflow sees
+
+A notification lists the declared profiles that are missing, and the **This workflow** section
+gives their state:
+
+![The "This workflow" section](images/panel-workflow.png)
 
 - the download icon installs a missing profile, **Install the workflow's profiles** installs
   all of them;
-- the **+** icon adds a profile missing from your file, taken from the node's source (with the
+- **+** on a profile missing from your file adds it, taken from the node's source (with the
   profiles it extends). Your other profiles are left as they are.
+
+### Check and fix the workflow's models
+
+A workflow downloaded from the internet often points to models by a name that does not match
+your installation: another folder (`flux2-vae.safetensors` where your profile installs
+`flux3-klein/flux2-vae.safetensors`), another precision (int8 instead of bf16), another version
+(`v2` instead of `v3.1`). ComfyUI then frames these nodes in red.
+
+Click **Check the workflow's models…** (on the node, or the sliders icon of the **This
+workflow** section). A dialog lists every model field of the workflow, with its state (red:
+file not found; blue: present but outside the declared profiles; green: provided by them), and
+for each one the files of your profiles that can replace it, best match first:
+
+![Models of a workflow downloaded from Hugging Face](images/models-dialog.png)
+
+- **same file**: the file the field asks for, in another folder;
+- **other variant**: the same model in another precision;
+- **other version**: another version of the model, in the same precision if possible;
+- then the files with a similar name, and the other files of the same kind.
+
+Only the clear matches are preselected; the others stay on **Keep**, and the list lets you
+pick. **Provided by** shows the profiles providing the chosen file: **+** declares one in the
+node. When all the models of the workflow are provided by profiles, the banner at the top
+gives the fewest profiles needed: **Declare in the workflow** adds them at once.
+
+Nothing changes in the fields before **Apply**; Ctrl+Z undoes it. The red frames go away for
+the fields whose file is installed; for the others, once you install the workflow's profiles.
+
+### One workflow for every variant
+
+To use a workflow in another precision, declare the variant you want in the node, then check
+the models again. With `flux3-klein[bf16]` declared, the official int8 workflow of FLUX.3
+[klein] is turned to the bf16 files:
+
+![The same workflow turned to the bf16 variant](images/models-dialog-variant.png)
+
+Apply, install `flux3-klein[bf16]` from the **This workflow** section, and the workflow runs in
+bf16. Your profiles can thus point to the original workflows of a model, without keeping a copy
+for each variant or folder layout.
 
 ## 8. Secrets: tokens and passwords
 

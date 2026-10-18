@@ -1681,6 +1681,19 @@ def profile_items(profiles, name):
     return list(dict.fromkeys(str(n) for n in names))
 
 
+def own_models(profiles, name):
+    """A profile's own models, "type/file" and their variants ([]: common to all of them), for
+    the panel's dialog matching the workflow's model fields to profiles."""
+    models = []
+    for item in profiles[name].get("models", []):
+        try:
+            models.append({"name": f"{item['type']}/{target_name(item, f'[{name}] models')}",
+                           "variants": item_variants(item)})
+        except (ConfigError, KeyError):
+            continue
+    return models
+
+
 def safe_total(profiles, name, paths=None):
     try:
         return profile_total(profiles, name, paths)
@@ -1729,6 +1742,7 @@ def profile_json(profiles, name, paths, manifest, states):
         **sizes_json(profiles, name, paths),
         "extends": profile.get("extends", []),
         "items": profile_items(profiles, name),
+        "models": own_models(profiles, name),
         "counts": {s: len(profile.get(s, [])) for s in SECTIONS},
         "state": profile_state(profiles, name, paths, states),
         "unmanaged": count_unmanaged(profiles, name, paths, manifest),
@@ -2073,7 +2087,12 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
 
     Profiles with variants: each variant counts as a profile of its own, along with the
     profile's common items. Uninstalling one variant thus keeps the common items as long as
-    another variant stays installed."""
+    another variant stays installed. A variant a profile only has through extends (no item of
+    its own for it, e.g. krea2-styles[bf16] whose bf16 files are those of krea2-turbo) only
+    keeps the profile's own items: otherwise it would forbid uninstalling the variant it
+    inherits (krea2-turbo[bf16]). And nothing at all when that profile is being uninstalled:
+    its other variants are the same items (krea2-styles[int8] and [bf16] differ only by
+    krea2-turbo)."""
     startup = split_names(os.environ.get("COMFY_PROFILES"))
     targets = installed_by((resolve if with_extends else own_items)(profiles, names), paths)
     requested = units(profiles, names)
@@ -2085,9 +2104,18 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
         except SystemExit:  # invalid reference in COMFY_PROFILES: ignored
             return True
 
+    def inherited_only(ref):
+        name, variants = selected(profiles, ref)
+        return bool(variants) and not any(
+            True for section in SECTIONS for _ in own_part(profiles, name, variants, section, common=False))
+
     keep = [ref for ref in startup if not leaving(ref, requested)]
+    implied = set()  # kept variants a profile only has through extends
+    uninstalled = {name for name, _ in removing}
     for ref in variant_refs(profiles):
         if ref in keep or leaving(ref, removing):
+            continue
+        if inherited_only(ref) and parse_ref(ref)[0] in uninstalled:
             continue
         try:
             theirs = installed_by(resolve(profiles, [ref]), paths)
@@ -2095,10 +2123,13 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
             continue
         if theirs and all(installed(path, link) for path, (_, _, link) in theirs.items()):
             keep.append(ref)
+            if inherited_only(ref):
+                implied.add(ref)
 
     needed = {}  # path -> kept profiles using it
     for name in keep:
-        for path in installed_by(resolve(profiles, [name]), paths):
+        items = own_items(profiles, [name]) if name in implied else resolve(profiles, [name])
+        for path in installed_by(items, paths):
             needed.setdefault(path, []).append(name)
 
     removed, kept, unmanaged = [], [], []

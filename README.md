@@ -199,7 +199,11 @@ VAE of `krea2-common`. With `--with-extends` ("Include the inherited profiles" c
 panel), the inherited profiles are uninstalled too: this is what a profile that only groups
 other profiles needs. pip packages are never removed. For a profile with variants, each
 variant counts as a profile of its own: uninstalling `krea2-raw[bf16]` removes the files of
-`bf16`, and its common items only if no other variant of the profile stays installed.
+`bf16`, and its common items only if no other variant of the profile stays installed. A
+variant a profile only has through `extends` (no item of its own for it: `krea2-styles[bf16]`,
+whose bf16 files are those of `krea2-turbo`) only protects the profile's own items, so that
+`krea2-turbo[bf16]` can still be uninstalled; and nothing when that profile is the one being
+uninstalled.
 
 For `uninstall` to still remove what was already there, **take it over**: `adopt PROFILE`
 (the profile's "link" button in the panel) adds to the manifest everything present for the
@@ -259,6 +263,42 @@ the profiles file, a button that **adds it from the node's source**. This adds t
 those it inherits from, without replacing the file: profiles already there stay as they are
 (reported if they differ from the source), and the rest of the file keeps its formatting.
 
+For a workflow without this node, the section says so and offers to add it (**+** icon),
+filled with the profiles ticked in the panel. The node is placed in the visible part of the
+canvas, without overlapping other nodes (otherwise just above the workflow, and the view goes
+to it).
+
+### Models of the workflow
+
+The **Check the workflow's models…** button (on the node, and in the **This workflow** section)
+opens a dialog listing the model fields of the workflow (loaders: `unet_name`, `clip_name`,
+`vae_name`, `lora_name`…, subgraphs included; for a widget promoted on a subgraph node, the
+field of the subgraph node). Each field is marked present and provided by the declared
+profiles, present but outside them, or file not found. For each field, a list offers the files
+of **all the profiles** of the file that can replace it, best match first:
+
+1. the same file in another folder (`flux2-vae.safetensors` → `flux3-klein/flux2-vae.safetensors`);
+2. the same model in another variant: names compared without their precision marks (`int8`,
+   `fp8`, `bf16`, `nvfp4`, `convrot`, `scaled`, `fp8mixed`, GGUF `q4_k_m`…);
+3. another version of the model (`v2` → `v3.1`, `2.0` → `2.1`), preferably in the same precision;
+4. a similar name, or a file of the same kind.
+
+Among good matches (1 to 3), the files of the declared profiles come first: declaring
+`flux3-klein[bf16]` turns the fields of an int8 workflow to the bf16 files. A choice is only
+preselected when it is clear (a good match ranked first on its own; ties broken by declared,
+installed, then by the profile providing the most files of the workflow). Under each field,
+**Provided by** gives the profiles providing the chosen file (up to 3, those providing the most
+files of the workflow first, with the matching variant); **+** adds one to the node (merging
+the variants of a profile already declared, e.g. `flux3-klein[int8,bf16]`), or creates the node.
+When every field points to a file of a profile, a banner at the top gives the fewest profiles
+providing them all, declared at once with **Declare in the workflow**.
+
+Profiles are declared in the node right away; the fields only change with **Apply**, undone with
+Ctrl+Z. ComfyUI then checks the missing models again: only the nodes whose chosen file is not
+installed yet keep their red frame (it goes away after the sync that installs it). One workflow
+thus serves every variant of a profile and every folder layout: the profiles can point to the
+original workflows of a model, without copies adapted to each variant or subfolder.
+
 ## Language
 
 The panel, the script's messages and the server's errors are in English or French. The panel
@@ -276,8 +316,10 @@ missing message stays in English.
 - Profile list: description, size, `extends`, *startup* badge for those of `COMFY_PROFILES`.
   A profile with variants keeps a single card, with one chip per variant (state color, size,
   ★ for the default variant): the ticked variants are those the card's buttons, and the
-  buttons under the list for a checked profile, apply to (`krea2-raw[int8,bf16]`). Its details
-  group the items by variant.
+  buttons under the list for a checked profile, apply to (`krea2-raw[int8,bf16]`). None is
+  ticked at first: these buttons stay inactive until a variant is. A ticked variant is
+  outlined, with a download icon if it is not fully installed. Its details group the items by
+  variant.
   For a profile that is not fully installed, a blue *… to download* badge gives the size of the
   missing files that installing it would add (`extends` included; custom nodes and pip
   packages are not counted). The background color gives the state: green installed
@@ -300,8 +342,8 @@ missing message stays in English.
 - Sync, dry-run, update (see [Update](#update)) or uninstall of the checked profiles, with live
   logs. One action at a time; **Stop** interrupts it (the current clone is abandoned without
   leaving an incomplete folder; downloads keep their `.part`, see [Downloads](#downloads)).
-- **This workflow** section, for a workflow that declares its profiles: see
-  [Workflow profiles](#workflow-profiles).
+- **This workflow** section: profiles declared by the open workflow, or the offer to add the
+  node, and the dialog checking the workflow's models: see [Workflow profiles](#workflow-profiles).
 - Profiles file: edit, import (file or URL), export, back to template.
 - **Recalculate sizes**: runs `comfy_profiles.py sizes` on the profiles file (only the files without
   a size are queried); **Recalculate all** also queries again those whose size is known
