@@ -35,8 +35,12 @@ profiles** node in the *utils* category (see [Workflow profiles](#workflow-profi
 - `web/profiles.js`: the sidebar tab.
 - `profiles_i18n.py` and `lang/`: translations (see [Language](#language)); `locales/`:
   translation of the node, loaded by ComfyUI.
-- `examples/profiles.example.json`: small profiles file, used as long as no other one is
-  provided.
+- `examples/profiles.example.json`: example profiles file, used as long as no other one is
+  provided. Its profiles install for real (no token needed, except possibly for CivitAI) and
+  cover every feature of the format: Hugging Face, GitHub, CivitAI and URL sources, Git custom
+  nodes (with `ref`), a Google Drive zip (in comment), pip packages, workflows, `extends`,
+  variants (FLUX.2 [klein] 4B in fp8, nvfp4, bf16), variants named in `extends`, grouping
+  profiles and `//` comments.
 - `profiles.schema.json`: JSON schema of the profiles file (validation and completion in an
   editor, through `"$schema"`).
 

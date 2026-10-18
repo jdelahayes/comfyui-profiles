@@ -1,29 +1,106 @@
 {
   "$schema": "https://raw.githubusercontent.com/jdelahayes/comfyui-profiles/main/profiles.schema.json",
+  "//": "Example profiles: every source and feature of the format. Keys starting with // are comments, ignored everywhere. Each profile below installs for real, without any token (except the CivitAI model, which may need CIVITAI_TOKEN).",
   "profiles": {
     "essential-nodes": {
-      "description": "Commonly used custom nodes (rgthree, KJNodes).",
+      "description": "Commonly used custom nodes (rgthree, KJNodes). Custom nodes from a Git repository, optionally pinned.",
       "custom_nodes": [
         {"git": "https://github.com/rgthree/rgthree-comfy.git"},
-        {"git": "https://github.com/kijai/ComfyUI-KJNodes.git"}
+        {"git": "https://github.com/kijai/ComfyUI-KJNodes.git", "ref": "main", "//": "ref: branch, tag or commit (optional)"}
+      ]
+    },
+
+    "video-tools": {
+      "description": "Video loading and saving (VideoHelperSuite), with a pip package. Also shows a custom node from a Google Drive zip, in comment.",
+      "custom_nodes": [
+        {"git": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"}
+      ],
+      "pip": ["imageio-ffmpeg"],
+      "//custom_nodes": [
+        {"gdrive": "https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing", "name": "ComfyUI-MyPrivateNode", "//": "Public zip on Google Drive (share link or file id), extracted into custom_nodes/<name>; encrypted zip: password in GDRIVE_ZIP_PASSWORD. Move it to custom_nodes with a real link to use it."}
       ]
     },
 
     "taesd-previews": {
-      "description": "Fast previews during generation (TAESD), SD 1.5 and SDXL: start ComfyUI with --preview-method taesd.",
-      "size": "19.6 MB",
+      "description": "Fast previews during generation (TAESD), SD 1.5, SDXL and FLUX.1: start ComfyUI with --preview-method taesd. Models from Hugging Face (optionally at a revision) and from a GitHub repository.",
+      "size": "29.5 MB",
       "models": [
         {"type": "vae_approx", "hf": "madebyollin/taesd", "file": "taesd_decoder.safetensors", "size": 4895612},
         {"type": "vae_approx", "hf": "madebyollin/taesd", "file": "taesd_encoder.safetensors", "size": 4895600},
-        {"type": "vae_approx", "hf": "madebyollin/taesdxl", "file": "taesdxl_decoder.safetensors", "size": 4895612},
-        {"type": "vae_approx", "hf": "madebyollin/taesdxl", "file": "taesdxl_encoder.safetensors", "size": 4895600}
+        {"type": "vae_approx", "hf": "madebyollin/taesdxl", "file": "taesdxl_decoder.safetensors", "revision": "main", "size": 4895612},
+        {"type": "vae_approx", "hf": "madebyollin/taesdxl", "file": "taesdxl_encoder.safetensors", "revision": "main", "size": 4895600},
+        {"type": "vae_approx", "github": "madebyollin/taesd", "file": "taef1_decoder.pth", "size": 4943336},
+        {"type": "vae_approx", "github": "madebyollin/taesd", "file": "taef1_encoder.pth", "size": 4943208}
+      ]
+    },
+
+    "upscalers": {
+      "description": "Image upscale models: from CivitAI (model version id) and from a direct URL. A subfolder in type keeps them apart in models/upscale_models/.",
+      "size": "134.0 MB",
+      "models": [
+        {"type": "upscale_models/general", "civitai": 125843, "name": "4x-UltraSharp.pt", "//": "civitai: the version id (?modelVersionId= in the page URL); name is required", "size": 66961958},
+        {"type": "upscale_models/general", "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth", "name": "RealESRGAN_x4plus.pth", "size": 67040989}
+      ]
+    },
+
+    "flux2-klein-4b-common": {
+      "description": "FLUX.2 [klein] 4B, shared by its profiles: VAE and the text encoder matching each variant. Models at the root of their type: the names the ComfyUI templates expect.",
+      "size": {"fp8": "8.6 GB", "nvfp4": "4.4 GB", "bf16": "8.6 GB"},
+      "extends": ["essential-nodes"],
+      "variants": ["fp8", "nvfp4", "bf16"],
+      "default_variant": "fp8",
+      "models": [
+        {"type": "vae", "hf": "Comfy-Org/vae-text-encorder-for-flux-klein-4b", "file": "split_files/vae/flux2-vae.safetensors", "size": 336211292},
+        {"type": "vae", "hf": "black-forest-labs/FLUX.2-small-decoder", "file": "full_encoder_small_decoder.safetensors", "size": 249519092},
+        {"variant": ["fp8", "bf16"], "type": "text_encoders", "hf": "Comfy-Org/vae-text-encorder-for-flux-klein-4b", "file": "split_files/text_encoders/qwen_3_4b.safetensors", "size": 8044982048},
+        {"variant": "nvfp4", "type": "text_encoders", "hf": "Comfy-Org/vae-text-encorder-for-flux-klein-4b", "file": "split_files/text_encoders/qwen_3_4b_fp4_flux2.safetensors", "size": 3848213998}
+      ]
+    },
+
+    "flux2-klein-4b": {
+      "description": "FLUX.2 [klein] 4B distilled (Apache 2.0): text to image and image editing in 4 steps. Variants: install with flux2-klein-4b[fp8], [nvfp4] (Blackwell GPUs), [bf16], or several: flux2-klein-4b[fp8,bf16].",
+      "size": {"fp8": "12.7 GB", "nvfp4": "6.9 GB", "bf16": "16.4 GB"},
+      "extends": ["flux2-klein-4b-common"],
+      "variants": ["fp8", "nvfp4", "bf16"],
+      "default_variant": "fp8",
+      "models": [
+        {"variant": "fp8", "type": "diffusion_models", "hf": "black-forest-labs/FLUX.2-klein-4b-fp8", "file": "flux-2-klein-4b-fp8.safetensors", "size": 4070624520},
+        {"variant": "nvfp4", "type": "diffusion_models", "hf": "black-forest-labs/FLUX.2-klein-4b-nvfp4", "file": "flux-2-klein-4b-nvfp4.safetensors", "size": 2460413488},
+        {"variant": "bf16", "type": "diffusion_models", "hf": "Comfy-Org/vae-text-encorder-for-flux-klein-4b", "file": "split_files/diffusion_models/flux-2-klein-4b.safetensors", "size": 7751105712}
+      ],
+      "workflows": [
+        {"variant": "fp8", "github": "Comfy-Org/workflow_templates", "file": "templates/image_flux2_klein_image_edit_4b_distilled.json", "size": 109330}
+      ]
+    },
+
+    "flux2-klein-4b-base": {
+      "description": "FLUX.2 [klein] Base 4B, undistilled: more diversity, for fine-tuning and LoRA training.",
+      "size": {"fp8": "12.7 GB", "bf16": "16.4 GB"},
+      "extends": ["flux2-klein-4b-common"],
+      "variants": ["fp8", "bf16"],
+      "default_variant": "fp8",
+      "models": [
+        {"variant": "fp8", "type": "diffusion_models", "hf": "black-forest-labs/FLUX.2-klein-base-4b-fp8", "file": "flux-2-klein-base-4b-fp8.safetensors", "size": 4089498488},
+        {"variant": "bf16", "type": "diffusion_models", "hf": "Comfy-Org/vae-text-encorder-for-flux-klein-4b", "file": "split_files/diffusion_models/flux-2-klein-base-4b.safetensors", "size": 7751105712}
+      ],
+      "workflows": [
+        {"variant": "fp8", "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/image_flux2_klein_image_edit_4b_base.json", "name": "image_flux2_klein_image_edit_4b_base.json", "size": 100447}
+      ]
+    },
+
+    "flux2-klein-4b-all": {
+      "description": "Groups the distilled and base FLUX.2 [klein] 4B in bf16 (variants named in extends), with the ComfyUI template that compares them.",
+      "size": "24.1 GB",
+      "extends": ["flux2-klein-4b[bf16]", "flux2-klein-4b-base[bf16]"],
+      "workflows": [
+        {"github": "Comfy-Org/workflow_templates", "file": "templates/image_flux2_klein_text_to_image.json", "size": 69872}
       ]
     },
 
     "starter": {
-      "description": "Example profile grouping the other two (extends).",
-      "size": "19.6 MB",
-      "extends": ["essential-nodes", "taesd-previews"]
+      "description": "Groups other profiles (extends): previews, upscalers and the essential custom nodes.",
+      "size": "163.5 MB",
+      "extends": ["essential-nodes", "taesd-previews", "upscalers"]
     }
   }
 }

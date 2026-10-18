@@ -68,7 +68,9 @@ on demand, the first time an encrypted Google Drive zip is extracted.
 ## 3. First steps in the panel
 
 On first launch, the panel shows the profiles of the **template**:
-`examples/profiles.example.json`, a small file with three profiles. To install one of them:
+`examples/profiles.example.json`. Its profiles install for real and show every feature of the
+format (all the sources, variants, `extends`, comments): a good starting point for your own
+file. To install one of them:
 
 1. Open the **Profiles** tab.
 2. Tick the profile, for instance `taesd-previews`.
