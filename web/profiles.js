@@ -33,80 +33,129 @@ async function loadMessages() {
 const STYLE = `
 .cprof { display: flex; flex-direction: column; gap: 10px; padding: 10px; height: 100%;
   min-height: 0; overflow-y: auto; box-sizing: border-box; font-size: 13px;
-  color: var(--fg-color); }
+  color: var(--fg-color);
+  /* Palette: one color per meaning, tints derived from it. */
+  --cp-ok: #10b981; --cp-warn: #f59e0b; --cp-err: #ef4444; --cp-info: #3b82f6;
+  /* Partially installed: bright yellow, never as a background tint (it turns brown on a dark
+     surface), only for the bars and dots. */
+  --cp-partial: #facc15;
+  --cp-accent: var(--p-primary-color, #6366f1);
+  --cp-surface: var(--comfy-menu-bg, #1e1e1e); --cp-radius: 8px; }
 .cprof h3 { margin: 0; font-size: 15px; }
 .cprof h4 { margin: 4px 0 0; font-size: 13px; border-bottom: 1px solid var(--border-color); }
 .cprof .field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; cursor: pointer; }
-.cprof input.num { width: 64px; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-color);
+.cprof input.num { width: 64px; padding: 3px 5px; border-radius: 6px; border: 1px solid var(--border-color);
   background: var(--comfy-input-bg); color: var(--input-text); }
 .cprof .muted { color: var(--descrip-text, #999); font-size: 12px; }
-.cprof .warn { color: #e0a030; font-size: 12px; }
-.cprof .error { color: #e05050; white-space: pre-wrap; font-size: 12px; }
+.cprof .warn { color: var(--cp-warn); font-size: 12px; }
+.cprof .error { color: var(--cp-err); white-space: pre-wrap; font-size: 12px; }
 .cprof .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .cprof button { background: var(--comfy-input-bg); color: var(--input-text, var(--fg-color));
-  border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 10px; cursor: pointer;
-  font-size: 12px; }
+  border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  font-size: 12px; transition: filter .15s, background .15s; }
 .cprof button:hover:not(:disabled) { filter: brightness(1.2); }
-.cprof button:disabled { opacity: .5; cursor: default; }
-.cprof button.icon { padding: 2px 5px; font-size: 11px; line-height: 1; }
+.cprof button:disabled { opacity: .45; cursor: default; }
+.cprof button.icon { padding: 3px 6px; font-size: 11px; line-height: 1; }
 .cprof .actions { display: flex; gap: 3px; }
-.cprof button.primary { background: var(--p-primary-color, #2a6fd6); color: #fff; border-color: transparent; }
-.cprof button.danger { background: #b83a3a; color: #fff; border-color: transparent; }
+.cprof button.primary { background: var(--cp-accent); color: #fff; border-color: transparent; }
+.cprof button.danger { background: var(--cp-err); color: #fff; border-color: transparent; }
 .cprof .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .cprof .filter { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.cprof .search { width: 100%; box-sizing: border-box; padding: 4px 6px; border-radius: 4px;
+.cprof .search { width: 100%; box-sizing: border-box; padding: 5px 8px; border-radius: 6px;
   border: 1px solid var(--border-color); background: var(--comfy-input-bg); color: var(--input-text); }
+.cprof .search:focus { outline: none; border-color: var(--cp-accent); }
 .cprof .match { font-family: monospace; word-break: break-all; }
-.cprof .list { display: flex; flex-direction: column; gap: 4px; }
-.cprof .profile { border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; }
-.cprof .profile.selected { border-color: var(--p-primary-color, #2a6fd6); }
-.cprof .profile.installed { background: rgba(58, 154, 90, .16); }
-.cprof .profile.partial { background: rgba(224, 160, 48, .16); }
-.cprof .profile.error { background: rgba(224, 80, 80, .16); }
+.cprof .list { display: flex; flex-direction: column; gap: 6px; }
+/* Profile card: state given by a colored bar on the left and a light tint. */
+.cprof .profile { --state: var(--border-color); border: 1px solid var(--border-color);
+  border-left: 3px solid var(--state); border-radius: var(--cp-radius); padding: 6px 8px;
+  background: var(--cp-surface); }
+.cprof .profile.installed { --state: var(--cp-ok);
+  background: linear-gradient(color-mix(in srgb, var(--cp-ok) 9%, transparent), color-mix(in srgb, var(--cp-ok) 9%, transparent)), var(--cp-surface); }
+.cprof .profile.partial { --state: var(--cp-partial); }
+.cprof .profile.error { --state: var(--cp-err);
+  background: linear-gradient(color-mix(in srgb, var(--cp-err) 9%, transparent), color-mix(in srgb, var(--cp-err) 9%, transparent)), var(--cp-surface); }
+.cprof .profile.selected { border-color: var(--cp-accent); border-left-color: var(--state);
+  box-shadow: 0 0 0 1px var(--cp-accent); }
 .cprof .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--descrip-text, #999); }
-.cprof .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px;
-  margin-right: 4px; vertical-align: -1px; border-radius: 2px; border: 1px solid var(--border-color); }
-.cprof .legend .state { cursor: pointer; padding: 0 4px; border-radius: 4px; border: 1px solid transparent; }
+.cprof .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px;
+  margin-right: 5px; vertical-align: 0; border-radius: 50%; background: var(--border-color); }
+.cprof .legend .state { cursor: pointer; padding: 1px 6px; border-radius: 999px; border: 1px solid transparent; }
 .cprof .legend .state:hover { color: var(--input-text); }
-.cprof .legend .chip.state { border-radius: 8px; border-color: #e0a030; }
-.cprof .legend .chip.state.active { border-style: solid; border-color: var(--p-primary-color, #2a6fd6); }
-.cprof .legend .state.active { color: var(--input-text); border-color: var(--p-primary-color, #2a6fd6); }
-.cprof .legend .installed::before { background: rgba(58, 154, 90, .5); }
-.cprof .legend .partial::before { background: rgba(224, 160, 48, .5); }
+.cprof .legend .state.active { color: var(--input-text); border-color: var(--cp-accent); }
+.cprof .legend .installed::before { background: var(--cp-ok); }
+.cprof .legend .partial::before { background: var(--cp-partial); }
 .cprof .head { display: flex; gap: 8px; align-items: center; }
 .cprof .head label { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; cursor: pointer;
   font-weight: 600; overflow-wrap: anywhere; }
-.cprof .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 2px; }
-.cprof .chip { font-size: 11px; padding: 0 6px; border-radius: 8px; white-space: nowrap;
-  background: var(--comfy-input-bg); border: 1px solid var(--border-color); }
-.cprof .chip.default { border-color: #3a9a5a; color: #3a9a5a; }
-.cprof .chip.download { border-color: #3a7abf; color: #3a7abf; }
-.cprof .chip.unmanaged { border-color: #e0a030; color: #e0a030; border-style: dashed; }
+/* Chips: pills tinted with their color. */
+.cprof .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 2px; }
+.cprof .chip { --tone: var(--descrip-text, #999); font-size: 11px; padding: 1px 8px; border-radius: 999px;
+  white-space: nowrap; color: var(--input-text, var(--fg-color)); background: var(--comfy-input-bg);
+  border: 1px solid transparent; }
+.cprof .chip.default, .cprof .chip.download, .cprof .chip.unmanaged {
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent); }
+.cprof .chip.default { --tone: var(--cp-ok); }
+.cprof .chip.download { --tone: var(--cp-info); }
+.cprof .chip.unmanaged { --tone: var(--cp-warn); border-color: color-mix(in srgb, var(--cp-warn) 45%, transparent);
+  border-style: dashed; }
+.cprof .legend .chip.unmanaged.active { border-style: solid; border-color: var(--cp-accent); }
 .cprof .legend .chip::before { display: none; }
+/* Variant chips: dot of the variant's state, ring when ticked. */
+.cprof .chip.variant { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  border-color: var(--border-color); background: var(--cp-surface); }
+.cprof .chip.variant::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--border-color); }
+.cprof .chip.variant.installed::before { background: var(--cp-ok); }
+.cprof .chip.variant.partial::before { background: var(--cp-partial); }
+.cprof .chip.variant.error::before { background: var(--cp-err); }
+.cprof .chip.variant.installed { background: color-mix(in srgb, var(--cp-ok) 14%, var(--cp-surface)); }
+.cprof .chip.variant input { display: none; }
+.cprof .chip.variant .pick { font-size: 9px; }
+/* Ticked: solid accent ring if already installed (✓); dashed blue if the card's sync will
+   install it (download icon). */
+.cprof .chip.variant.chosen { border-color: var(--cp-accent); box-shadow: 0 0 0 1px var(--cp-accent); }
+.cprof .chip.variant.chosen .pick { color: var(--cp-accent); }
+.cprof .chip.variant.chosen.pending { border: 1px dashed var(--cp-info); box-shadow: none;
+  background: color-mix(in srgb, var(--cp-info) 14%, var(--cp-surface)); }
+.cprof .chip.variant.chosen.pending .pick { color: var(--cp-info); }
 .cprof .details { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .cprof .item { display: flex; gap: 6px; font-size: 12px; font-family: monospace; }
 .cprof .details .group { margin-top: 6px; font-size: 12px; font-weight: 600;
   border-bottom: 1px solid var(--border-color); }
 .cprof .details .group ~ .item { margin-left: 8px; }
+/* Items of a variant, in the details: a block of their own, colored by the variant's state
+   (opaque, so as not to take the card's color). */
+.cprof .details .variant { --state: var(--border-color); border: 1px solid var(--border-color);
+  border-left: 3px solid var(--state); border-radius: 6px; padding: 0 6px 4px; margin-top: 6px;
+  background: var(--cp-surface); }
+.cprof .details .variant .group { margin-top: 3px; }
+.cprof .details .variant.installed { --state: var(--cp-ok);
+  background: color-mix(in srgb, var(--cp-ok) 12%, var(--cp-surface)); }
+.cprof .details .variant.partial { --state: var(--cp-partial); }
+.cprof .details .variant.error { --state: var(--cp-err);
+  background: color-mix(in srgb, var(--cp-err) 12%, var(--cp-surface)); }
 .cprof .item .name { flex: 1; word-break: break-all; }
 .cprof .item .size { white-space: nowrap; }
 .cprof .item .link { flex: none; width: 16px; text-align: center; color: inherit; opacity: .7;
   text-decoration: none; }
-.cprof .item a.link:hover { opacity: 1; color: var(--p-primary-color, #6cf); }
-.cprof .ok { color: #3a9a5a; }
-.cprof .todo { color: #e0a030; }
+.cprof .item a.link:hover { opacity: 1; color: var(--cp-accent); }
+.cprof .ok { color: var(--cp-ok); }
+.cprof .todo { color: var(--cp-warn); }
 .cprof .log { background: var(--comfy-input-bg); border: 1px solid var(--border-color);
-  border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px; white-space: pre-wrap;
+  border-radius: 6px; padding: 6px; font-family: monospace; font-size: 11px; white-space: pre-wrap;
   word-break: break-all; max-height: 320px; min-height: 80px; overflow-y: auto; }
-.cprof .workflow { border: 1px solid var(--border-color); border-left: 3px solid #3a7abf;
-  border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
-.cprof .workflow.done { border-left-color: #3a9a5a; }
+.cprof .workflow { border: 1px solid var(--border-color); border-left: 3px solid var(--cp-info);
+  border-radius: var(--cp-radius); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
+  background: color-mix(in srgb, var(--cp-info) 7%, var(--cp-surface)); }
+.cprof .workflow.done { border-left-color: var(--cp-ok);
+  background: color-mix(in srgb, var(--cp-ok) 7%, var(--cp-surface)); }
 .cprof .need { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .cprof .need .name { flex: 1; min-width: 0; font-family: monospace; word-break: break-all; cursor: pointer; }
 .cprof .need .name:hover { text-decoration: underline; }
 .cprof textarea { width: 100%; min-height: 400px; box-sizing: border-box; resize: vertical;
   font-family: monospace; font-size: 12px; background: var(--comfy-input-bg);
-  color: var(--input-text, var(--fg-color)); border: 1px solid var(--border-color); border-radius: 4px; }
+  color: var(--input-text, var(--fg-color)); border: 1px solid var(--border-color); border-radius: 6px; }
 `;
 
 function el(tag, attrs = {}, ...children) {
@@ -141,7 +190,8 @@ function toast(severity, summary, detail, life = 5000) {
 // "Workflow profiles" node (profiles_node.py): profiles the workflow needs, and URL of the
 // profiles file that defines them.
 const WORKFLOW_NODE = "WorkflowProfiles";
-const PROFILE_NAME = /^[\w.-]+$/;
+// A profile, optionally with variants between brackets: krea2-raw[int8,bf16].
+const PROFILE_NAME = /^[\w.-]+(\[([\w.-]+(,[\w.-]+)*)?\])?$/;
 // States where the profile has nothing to install for the workflow (see STATES).
 const SATISFIED = new Set(["installed", "empty"]);
 
@@ -156,16 +206,42 @@ function workflowNeeds() {
     if (node.type !== WORKFLOW_NODE) continue;
     const value = (name) => String(node.widgets?.find((w) => w.name === name)?.value ?? "").trim();
     const source = value("source");
-    for (const name of value("profiles").split(",").map((n) => n.trim()).filter(Boolean)) {
+    for (const name of splitRefs(value("profiles"))) {
       if (!needs.get(name)) needs.set(name, source);
     }
   }
   return [...needs].map(([name, source]) => ({ name, source, valid: PROFILE_NAME.test(name) }));
 }
 
+// Profile references separated by commas, except those between brackets (variants).
+function splitRefs(text) {
+  return text.split(/,(?![^\[]*\])/).map((n) => n.replace(/\s+/g, "")).filter(Boolean);
+}
+
+// "krea2-raw[int8,bf16]" -> { name: "krea2-raw", variants: ["int8", "bf16"] }; variants: null
+// without brackets.
+function parseRef(ref) {
+  const [, name, inner] = ref.match(/^([^[]*)(?:\[(.*)\])?$/);
+  return { name, variants: inner === undefined ? null : inner.split(",").filter(Boolean) };
+}
+
 // Declared profile: its `list --json` entry, or null if it is not in the profiles file.
 function declared(profiles, need) {
-  return need.valid && Object.hasOwn(profiles, need.name) ? profiles[need.name] : null;
+  const { name } = parseRef(need.name);
+  return need.valid && Object.hasOwn(profiles, name) ? profiles[name] : null;
+}
+
+// State of a profile reference: that of the profile, or of the requested variants (installed
+// if all of them are); without brackets, that of the profile named alone (common items and
+// default variant). "unknown" for a variant the profile does not have.
+function refState(p, ref) {
+  if (!p.variants) return p.state;
+  const { variants } = parseRef(ref);
+  if (variants === null) return p.ref_state;
+  const states = variants.map((v) => p.variants.find((pv) => pv.name === v)?.state ?? "unknown");
+  if (states.includes("unknown")) return "unknown";
+  if (states.every((s) => SATISFIED.has(s))) return "installed";
+  return states.some((s) => s === "installed" || s === "partial") ? "partial" : "missing";
 }
 
 // Last alert shown, so as not to repeat it at each reload of the same graph (undo / redo, back
@@ -186,9 +262,10 @@ async function checkWorkflow() {
   }
   const missing = needs.flatMap((need) => {
     const p = declared(profiles, need);
-    if (p && SATISFIED.has(p.state)) return [];
-    const state = !need.valid ? t("invalid name")
-      : p ? t(STATES[p.state]?.label ?? STATES.missing.label) : t("not in the profiles file");
+    const ps = p && refState(p, need.name);
+    if (p && SATISFIED.has(ps)) return [];
+    const state = !need.valid ? t("invalid name") : !p ? t("not in the profiles file")
+      : ps === "unknown" ? t("unknown variant") : t(STATES[ps]?.label ?? STATES.missing.label);
     return [`${need.name} (${state.toLowerCase()})`];
   });
   const key = missing.join(", ");
@@ -204,6 +281,8 @@ class ProfilesPanel {
     this.root = el("div", { class: "cprof" });
     this.data = null;          // result of `list --json`
     this.selected = new Set();
+    // Profile with variants -> variants ticked on its card (default: its default_variant).
+    this.variants = new Map();
     this.expanded = new Map();  // profile -> state (`show --json`), or null while loading
     this.leavesOnly = loadSetting(LEAVES_KEY) === "1";  // only the profiles at the end of the tree
     this.namesOnly = loadSetting(NAMES_KEY) === "1";    // text filter on the profile names only
@@ -241,7 +320,13 @@ class ProfilesPanel {
 
   setSync(sync) {
     this.sync = sync;
-    if (sync.running) this.selected = new Set(sync.profiles);
+    if (sync.running) {
+      this.selected = new Set(sync.profiles.map((ref) => parseRef(ref).name));
+      for (const ref of sync.profiles) {
+        const { name, variants } = parseRef(ref);
+        if (variants) this.variants.set(name, new Set(variants));
+      }
+    }
     this.logBox.replaceChildren();
     this.logLines.clear();
     for (const [index, text] of sync.lines || []) this.setLine(index, text);
@@ -295,16 +380,34 @@ class ProfilesPanel {
     this.expanded.set(name, null);
     this.render();
     try {
-      this.expanded.set(name, await request("GET", `/status?profiles=${encodeURIComponent(name)}`));
+      // All the variants of the profile, grouped by variant.
+      const ref = this.data?.profiles[name] ? allVariants(name, this.data.profiles[name]) : name;
+      this.expanded.set(name, await request("GET", `/status?profiles=${encodeURIComponent(ref)}`));
     } catch (e) {
       this.expanded.set(name, { error: e.message });
     }
     if (this.expanded.has(name)) this.render();
   }
 
+  // Variants ticked on the card of a profile with variants.
+  chosen(name) {
+    const p = this.data.profiles[name];
+    return this.variants.get(name) ?? new Set(p?.default_variant ? [p.default_variant] : []);
+  }
+
+  // What the actions on a profile apply to: name[ticked variants] for a profile with variants
+  // (name[]: its common items only), otherwise its name.
+  ref(name) {
+    const p = this.data?.profiles[name];
+    if (!p?.variants) return name;
+    const chosen = this.chosen(name);
+    return `${name}[${p.variants.map((v) => v.name).filter((v) => chosen.has(v)).join(",")}]`;
+  }
+
   // force: for "sizes", also queries again the files whose size is known; for "sync", also
   // updates what changed at the source.
-  async startSync(dryRun, action = "sync", profiles = [...this.selected], withExtends = false, force = false) {
+  async startSync(dryRun, action = "sync", profiles = [...this.selected].map((n) => this.ref(n)),
+                  withExtends = false, force = false) {
     try {
       this.setSync(await request("POST", "/sync",
         { action, profiles, dry_run: dryRun, with_extends: withExtends, force }));
@@ -328,7 +431,7 @@ class ProfilesPanel {
 
   // withExtends: also uninstall the profiles they inherit from (otherwise only their own
   // items).
-  async prepareUninstall(profiles = [...this.selected], withExtends = false) {
+  async prepareUninstall(profiles = [...this.selected].map((n) => this.ref(n)), withExtends = false) {
     try {
       const plan = await request("GET",
         `/uninstall-plan?profiles=${encodeURIComponent(profiles.join(","))}&with_extends=${withExtends ? 1 : 0}`);
@@ -346,7 +449,8 @@ class ProfilesPanel {
                  t("Uninstalling can then remove them, including custom nodes installed with the " +
                    "Manager or models copied by hand."))) return;
     try {
-      const { adopted } = await request("POST", "/adopt", { profiles: [name] });
+      const { adopted } = await request("POST", "/adopt",
+        { profiles: [allVariants(name, this.data.profiles[name])] });
       toast("success", t("Profiles"), t("{name}: {n} item(s) taken over.", { name, n: adopted.length }));
     } catch (e) {
       toast("error", t("Profiles"), e.message);
@@ -660,11 +764,11 @@ class ProfilesPanel {
     const locked = running || this.data.readonly;
 
     // Profiles at the end of the dependency tree: no other profile extends them. With
-    // this.grouped, a profile extended only by grouping profiles (e.g. minimax-h3-all-*) also
+    // this.grouped, a profile extended only by grouping profiles (e.g. minimax-h3-all) also
     // counts as final. A selected profile stays shown, so as not to act on an invisible
     // selection.
     const parents = new Set(Object.values(this.data.profiles)
-      .filter((p) => !(this.grouped && isGroup(p))).flatMap((p) => p.extends));
+      .filter((p) => !(this.grouped && isGroup(p))).flatMap((p) => p.extends.map((r) => parseRef(r).name)));
     const entries = Object.entries(this.data.profiles);
     // Text filter: profile name, otherwise names of its items (extends included).
     const query = this.search.value.trim().toLowerCase();
@@ -683,10 +787,14 @@ class ProfilesPanel {
     const hidden = entries.length - shown.length;
     const profiles = shown.map(([name, p]) => {
       const detail = this.expanded.get(name);
-      const state = STATES[p.state] || STATES.missing;
-      const label = t(state.label);
-      const size = profileSize(p);
-      const todo = todoSize(p);
+      const label = t((STATES[p.state] || STATES.missing).label);
+      // Actions of the card: on the ticked variants for a profile with variants.
+      const ref = this.ref(name);
+      const state = STATES[p.variants ? actionState(p, this.chosen(name)) : p.state] || STATES.missing;
+      // Size: per variant, on its chip, for a profile with variants.
+      const size = !p.variants && profileSize(p);
+      const todo = !p.variants && todoSize(p);
+      const startup = this.data.default.filter((r) => parseRef(r).name === name);
       return el("div", { class: `profile ${p.state}${this.selected.has(name) ? " selected" : ""}`, title: label },
         el("div", { class: "head" },
           el("label", {},
@@ -703,18 +811,20 @@ class ProfilesPanel {
               t("Take over the {n} item(s) of {name} already present…", { n: p.unmanaged, name }),
               locked, () => this.adopt(name, p.unmanaged)),
             iconButton("pi-download",
-              state.install ? t("Install {name} (what is missing)", { name }) : `${name} : ${label.toLowerCase()}`,
-              locked || !state.install, () => this.startSync(false, "sync", [name])),
+              state.install ? t("Install {name} (what is missing)", { name: ref }) : `${ref} : ${t(state.label).toLowerCase()}`,
+              locked || !state.install, () => this.startSync(false, "sync", [ref])),
             iconButton("pi-trash",
-              state.uninstall ? t("Uninstall {name}…", { name }) : `${name} : ${label.toLowerCase()}`,
-              locked || !state.uninstall, () => this.prepareUninstall([name])),
+              state.uninstall ? t("Uninstall {name}…", { name: ref }) : `${ref} : ${t(state.label).toLowerCase()}`,
+              locked || !state.uninstall, () => this.prepareUninstall([ref])),
             iconButton(this.expanded.has(name) ? "pi-chevron-down" : "pi-chevron-right",
               this.expanded.has(name) ? t("Hide details") : t("Show what is installed"),
               false, () => this.expand(name)))),
         // Chips under the name: on the same line, they would squash it in the sidebar.
-        (this.data.default.includes(name) || size || todo || p.unmanaged > 0) && el("div", { class: "chips" },
-          this.data.default.includes(name) &&
-            el("span", { class: "chip default", title: t("In COMFY_PROFILES: synced at every startup") },
+        p.variants && this.renderVariants(name, p, running),
+        (startup.length || size || todo || p.unmanaged > 0) && el("div", { class: "chips" },
+          startup.length > 0 &&
+            el("span", { class: "chip default", title: t("In COMFY_PROFILES: synced at every startup") +
+                (p.variants ? ` (${startup.join(", ")})` : "") },
               t("startup")),
           size && el("span", { class: "chip", title: t("Total size of the profile's files, extends included") }, size),
           todo && el("span", {
@@ -731,7 +841,7 @@ class ProfilesPanel {
         matches.get(name)?.length > 0 && el("div", { class: "muted match" },
           t("Contains: {items}", { items: matches.get(name).slice(0, 3).join(", ") +
             (matches.get(name).length > 3 ? ` (+${matches.get(name).length - 3})` : "") })),
-        this.expanded.has(name) && this.renderDetail(detail));
+        this.expanded.has(name) && this.renderDetail(detail, p));
     });
 
     const selection = [...this.selected];
@@ -796,7 +906,7 @@ class ProfilesPanel {
           t("Hides profiles extended by others (e.g. the *-common profiles), installed along with them")),
         this.leavesOnly && this.toggle("grouped", GROUPED_KEY, t("Also show grouped profiles"),
           t("Also shows final profiles extended by a group profile (one with no items of its own " +
-            "that only combines other profiles, e.g. minimax-h3-all-*)")),
+            "that only combines other profiles, e.g. minimax-h3-all)")),
         hidden > 0 && el("span", { class: "muted" }, t("({n} hidden)", { n: hidden }))),
       el("div", { class: "list" }, profiles),
       el("div", { class: "bar" },
@@ -821,32 +931,71 @@ class ProfilesPanel {
     );
   }
 
+  // Variants of a profile: a chip each (state, size), ticked for the card's actions.
+  renderVariants(name, p, running) {
+    const chosen = this.chosen(name);
+    return el("div", { class: "chips" },
+      p.variants.map((v) => {
+        const isDefault = v.name === p.default_variant;
+        const state = t((STATES[v.state] || STATES.missing).label);
+        const todo = todoSize(v);
+        const picked = chosen.has(v.name);
+        // Ticked but not (fully) installed: what the card's sync will install.
+        const pending = picked && !SATISFIED.has(v.state);
+        return el("label", {
+          class: `chip variant ${v.state}${picked ? " chosen" : ""}${pending ? " pending" : ""}`,
+          title: [`${name}[${v.name}] : ${state.toLowerCase()}`, isDefault && t("Default variant"),
+                  todo, pending ? t("Ticked: installed by the card's sync")
+                    : picked ? t("Ticked: already installed")
+                    : t("Tick the variants the card's actions apply to")].filter(Boolean).join("\n"),
+        },
+          el("input", {
+            type: "checkbox", checked: chosen.has(v.name), disabled: running,
+            onchange: (e) => {
+              const next = new Set(chosen);
+              e.target.checked ? next.add(v.name) : next.delete(v.name);
+              this.variants.set(name, next);
+              this.render();
+            },
+          }),
+          `${v.name}${isDefault ? " ★" : ""} · ${profileSize(v) || "?"}`,
+          picked && el("i", { class: `pick pi ${pending ? "pi-download" : "pi-check"}` }));
+      }));
+  }
+
   // Profiles declared by the open workflow ("Workflow profiles" node): state, install, and
   // adding those missing from the profiles file from the declared source.
   renderWorkflow(locked) {
     const needs = workflowNeeds();
     if (!needs.length) return null;
     const profiles = this.data.profiles;
+    // State of each declared profile (of its requested variants), null if not in the file.
+    const stateOf = (need) => {
+      const p = declared(profiles, need);
+      return p && refState(p, need.name);
+    };
     const toInstall = needs.filter((n) => {
-      const p = declared(profiles, n);
-      return p && !SATISFIED.has(p.state) && STATES[p.state]?.install;
+      const s = stateOf(n);
+      return s && !SATISFIED.has(s) && STATES[s]?.install;
     }).map((n) => n.name);
-    const done = needs.every((n) => SATISFIED.has(declared(profiles, n)?.state));
+    const done = needs.every((n) => SATISFIED.has(stateOf(n)));
     const rows = needs.map((need) => {
       const p = declared(profiles, need);
-      const state = p && (STATES[p.state] || STATES.missing);
+      const ps = stateOf(need);
+      const state = p && (STATES[ps] || STATES.missing);
       const status = !need.valid ? el("span", { class: "error" }, t("invalid name"))
         : !p ? el("span", { class: "warn" }, t("not in the profiles file"))
-        : el("span", { class: SATISFIED.has(p.state) ? "ok" : "todo" }, t(state.label));
+        : ps === "unknown" ? el("span", { class: "error" }, t("unknown variant"))
+        : el("span", { class: SATISFIED.has(ps) ? "ok" : "todo" }, t(state.label));
       return el("div", { class: "need" },
-        el("span", { class: SATISFIED.has(p?.state) ? "ok" : "todo" }, SATISFIED.has(p?.state) ? "✓" : "✗"),
+        el("span", { class: SATISFIED.has(ps) ? "ok" : "todo" }, SATISFIED.has(ps) ? "✓" : "✗"),
         el("span", {
           class: "name", title: t("Show this profile in the list"),
-          onclick: () => { this.search.value = need.name; this.render(); },
+          onclick: () => { this.search.value = parseRef(need.name).name; this.render(); },
         }, need.name),
         status,
         el("div", { class: "actions" },
-          p && state.install && !SATISFIED.has(p.state) && iconButton("pi-download",
+          p && ps !== "unknown" && state.install && !SATISFIED.has(ps) && iconButton("pi-download",
             t("Install {name} (what is missing)", { name: need.name }), locked,
             () => this.startSync(false, "sync", [need.name])),
           !p && need.valid && need.source && iconButton("pi-plus",
@@ -903,7 +1052,8 @@ class ProfilesPanel {
       }, t("Back to template")));
   }
 
-  renderDetail(detail) {
+  // p: the profile's `list --json` entry, for the state of its variants.
+  renderDetail(detail, p) {
     if (detail === null || detail === undefined) return el("div", { class: "details muted" }, t("Loading…"));
     if (detail.error) return el("div", { class: "details error" }, detail.error);
     if (!detail.length) return el("div", { class: "details muted" }, t("(empty profile)"));
@@ -922,12 +1072,21 @@ class ProfilesPanel {
       el("div", { class: missing ? "todo" : "ok" },
         missing ? t("{n} of {total} item(s) to install", { n: missing, total: detail.length })
           : t("Everything is installed")),
-      groups.map((group) => [
-        titled && el("div", { class: "group" },
-          group.inherited ? t("Inherited from {name}", { name: group.profile }) : t("Profile's own"),
-          el("span", { class: "muted" }, ` · ${group.items.filter((i) => !i.missing).length}/${group.items.length}`)),
-        group.items.map((item) => this.renderItem(item)),
-      ]));
+      groups.map((group) => {
+        const { variants } = parseRef(group.profile);
+        const content = [
+          titled && el("div", { class: "group" },
+            group.inherited ? t("Inherited from {name}", { name: group.profile })
+              : variants ? t("Variant {name}", { name: variants.join(", ") })
+              : groups.some((g) => parseRef(g.profile).variants) ? t("Common to all variants") : t("Profile's own"),
+            el("span", { class: "muted" }, ` · ${group.items.filter((i) => !i.missing).length}/${group.items.length}`)),
+          group.items.map((item) => this.renderItem(item)),
+        ];
+        // A variant's items: in a block colored by its state (that of its chip).
+        return variants && !group.inherited && p?.variants
+          ? el("div", { class: `variant ${actionState(p, new Set(variants))}` }, content)
+          : content;
+      }));
   }
 
   renderItem(item) {
@@ -947,10 +1106,12 @@ class ProfilesPanel {
   renderLink(link) {
     if (!/^https?:\/\//.test(link?.url || "")) return el("span", { class: "link" });
     const site = LINK_SITES[link.site] || LINK_SITES.url;
-    return el("a", {
+    const a = el("a", {
       class: "link", href: link.url, target: "_blank", rel: "noopener noreferrer",
       title: `${t(site.label)} : ${link.url}`,
-    }, site.text ?? el("i", { class: site.icon }));
+    }, site.svg ? null : site.text ?? el("i", { class: site.icon }));
+    if (site.svg) a.innerHTML = site.svg;  // constant markup, see LINK_SITES
+    return a;
   }
 }
 
@@ -958,7 +1119,13 @@ class ProfilesPanel {
 const LINK_SITES = {
   hf: { label: "Hugging Face", text: "🤗" },
   github: { label: "GitHub", icon: "pi pi-github" },
-  civitai: { label: "CivitAI", text: "C" },
+  // No CivitAI icon in PrimeIcons: its hexagon logo, drawn inline.
+  civitai: {
+    label: "CivitAI",
+    svg: '<svg viewBox="0 0 24 24" width="13" height="13" style="vertical-align:-2px">' +
+      '<path d="M12 1.5 21.1 6.75v10.5L12 22.5 2.9 17.25V6.75z" fill="none" stroke="#3b82f6" stroke-width="2.2" stroke-linejoin="round"/>' +
+      '<path d="M15.6 9.2A4.2 4.2 0 1 0 15.6 14.8" fill="none" stroke="#3b82f6" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  },
   gdrive: { label: "Google Drive", icon: "pi pi-google" },
   pypi: { label: "PyPI", icon: "pi pi-box" },
   git: { label: "Git repository", icon: "pi pi-code" },  // translated when shown
@@ -1010,6 +1177,21 @@ const STATE_FILTERS = {
 // Grouping profile: no items of its own, it only gathers other profiles.
 function isGroup(p) {
   return p.extends.length > 1 && Object.values(p.counts).every((n) => n === 0);
+}
+
+// The profile with all its variants (details, take over).
+function allVariants(name, p) {
+  return p.variants ? `${name}[${p.variants.map((v) => v.name).join(",")}]` : name;
+}
+
+// State the card's actions follow, for the variants ticked on a profile with variants: that of
+// its common items when none is ticked.
+function actionState(p, chosen) {
+  const states = p.variants.filter((v) => chosen.has(v.name)).map((v) => v.state);
+  if (!states.length) return p.common_state;
+  if (states.every((s) => s === "installed")) return "installed";
+  if (states.some((s) => s === "installed" || s === "partial")) return "partial";
+  return states.every((s) => s === "error") ? "error" : "missing";
 }
 
 function loadSetting(key) {

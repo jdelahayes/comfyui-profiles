@@ -5,7 +5,7 @@
     "inputs": {
       "profiles": {
         "name": "profils",
-        "tooltip": "Noms des profils, séparés par des virgules (ex. krea2, essential-nodes)."
+        "tooltip": "Noms des profils, séparés par des virgules (ex. krea2-turbo, essential-nodes). Variantes entre crochets : krea2-turbo[int8], krea2-raw[int8,bf16] ; sans crochets, la variante par défaut du profil."
       },
       "source": {
         "name": "source",

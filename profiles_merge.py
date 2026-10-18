@@ -30,10 +30,12 @@ def profiles_of(text, what, _):
 
 
 def with_extends(profiles, names, _):
-    """`names` and the profiles they inherit from, in `profiles` (each one once)."""
+    """`names` and the profiles they inherit from, in `profiles` (each one once). A profile
+    with variants comes whole, whatever variants are asked (krea2-raw[int8] -> krea2-raw)."""
     found = []
 
     def visit(name):
+        name = name.split("[", 1)[0].strip()
         if name in found:
             return
         if name not in profiles:

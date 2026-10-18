@@ -19,6 +19,10 @@ Profiles file, the first one found:
   3. <user>/__comfy_profiles/profiles.json: the one written by editing and importing in the panel
   4. the template, read-only: $COMFY_PROFILES_SEED, otherwise examples/profiles.example.json
 Profiles synced by default: $COMFY_PROFILES (comma-separated).
+Variants: a profile declaring "variants" (e.g. int8, fp8, bf16) is named with the ones to
+install between brackets: krea2-turbo[int8], krea2-raw[int8,bf16]. Without brackets, its
+"default_variant" is installed, or only its common items (those without "variant") if it has
+none.
 `sync --update` also updates what the manager installed or took over (see Manifest), if it
 changed at the source: git custom nodes (latest commit of their branch) or Drive ones (different
 zip), models and workflows (Hugging Face or HTTP ETag; never CivitAI, whose files don't change),
@@ -91,7 +95,11 @@ VERSIONS_NAME = "versions.json"
 SETTINGS_NAME = "settings.json"
 SECTIONS = ("custom_nodes", "pip", "models", "workflows")
 # "size": total computed by profile_sizes.py (informative, ignored by sync).
-PROFILE_KEYS = {"description", "size", "extends", *SECTIONS}
+PROFILE_KEYS = {"description", "size", "extends", "variants", "default_variant", *SECTIONS}
+# Reference to a profile: its name, optionally followed by the variants to install between
+# brackets (krea2-turbo[int8], krea2-raw[int8,bf16]; krea2-raw[]: common items only).
+PROFILE_REF = re.compile(r"([\w.-]+)(?:\[([\w.,\s-]*)\])?")
+VARIANT_NAME = re.compile(r"[\w.-]+")
 SOURCES = ("hf", "github", "url", "civitai")
 # Cloudflare (in front of civitai.com notably) rejects urllib's default User-Agent.
 USER_AGENT = "comfyui-profiles"
@@ -267,33 +275,151 @@ def load_profiles(path, source="option"):
         if unknown:
             sys.exit("!! " + t("Profile '{name}': unknown key(s) {keys} (expected: {expected})",
                                name=name, keys=sorted(unknown), expected=", ".join(sorted(PROFILE_KEYS))))
+        check_variants(name, profile)
     return profiles
 
 
+# --- Variants -----------------------------------------------------------------------------
+# A profile may declare variants (e.g. int8, fp8, bf16 of the same models): "variants" lists
+# them, each item tagged with "variant" (a name or a list of names) belongs to these variants
+# only, the others are common to all of them. "default_variant": the variant installed when the
+# profile is named without brackets; without it, only the common items are.
+
+def item_variants(item):
+    tags = item.get("variant") if isinstance(item, dict) else None
+    return [tags] if isinstance(tags, str) else list(tags or [])
+
+
+def check_variants(name, profile):
+    variants = profile.get("variants", [])
+    if (not isinstance(variants, list) or len(set(variants)) != len(variants)
+            or not all(isinstance(v, str) and VARIANT_NAME.fullmatch(v) for v in variants)):
+        sys.exit("!! " + t("Profile '{name}': 'variants' must be a list of distinct names", name=name))
+    default = profile.get("default_variant")
+    if default is not None and default not in variants:
+        sys.exit("!! " + t("Profile '{name}': default_variant '{variant}' is not in 'variants'",
+                           name=name, variant=default))
+    for section in SECTIONS:
+        for item in profile.get(section, []):
+            unknown = [v for v in item_variants(item) if v not in variants]
+            if unknown:
+                sys.exit("!! " + t("Profile '{name}': unknown variant(s) {variants} in {section} "
+                                   "(declared: {available})", name=name, variants=", ".join(map(str, unknown)),
+                                   section=section, available=", ".join(variants) or "-"))
+
+
 def split_names(value):
-    return [n.strip() for n in (value or "").split(",") if n.strip()]
+    """Profile references separated by commas, except those between brackets."""
+    return [n.strip() for n in re.split(r",(?![^\[]*\])", value or "") if n.strip()]
+
+
+def parse_ref(ref):
+    """(profile name, variants between brackets, or None without brackets)."""
+    match = PROFILE_REF.fullmatch(ref.strip())
+    if not match:
+        return ref, None
+    if match.group(2) is None:
+        return match.group(1), None
+    return match.group(1), [v.strip() for v in match.group(2).split(",") if v.strip()]
+
+
+def make_ref(name, variants):
+    return f"{name}[{','.join(variants)}]"
+
+
+def selected(profiles, ref):
+    """(profile name, variants to install, in the declared order): those of the reference,
+    otherwise the default variant (none without default_variant: common items only)."""
+    name, variants = parse_ref(ref)
+    if name not in profiles:
+        sys.exit("!! " + t("Unknown profile: '{name}' (available: {available})",
+                           name=name, available=", ".join(profiles)))
+    profile = profiles[name]
+    declared = profile.get("variants", [])
+    if variants is None:
+        return name, [profile["default_variant"]] if profile.get("default_variant") else []
+    unknown = [v for v in variants if v not in declared]
+    if unknown:
+        sys.exit("!! " + t("Profile '{name}': unknown variant(s) {variants} (available: {available})",
+                           name=name, variants=", ".join(unknown), available=", ".join(declared) or "-"))
+    return name, [v for v in declared if v in variants]
+
+
+def parent_ref(profiles, parent, name, variants):
+    """Reference of a profile `name` inherits from (extends), `variants` being those selected
+    for it. A parent named without brackets that declares variants follows the child's ones
+    (those it has: krea2-raw[bf16] -> its parent's bf16), provided the child has variants;
+    otherwise, it gets its own default variant. Brackets in `extends` take precedence."""
+    parent_name, explicit = parse_ref(parent)
+    if (explicit is not None or not profiles[name].get("variants")
+            or parent_name not in profiles or not profiles[parent_name].get("variants")):
+        return parent
+    return make_ref(parent_name, [v for v in profiles[parent_name]["variants"] if v in variants])
+
+
+def canonical(profiles, ref):
+    """Same reference with its variants written out: krea2-turbo -> krea2-turbo[int8]."""
+    name, variants = selected(profiles, ref)
+    return make_ref(name, variants) if profiles[name].get("variants") else name
+
+
+def all_variants(profiles, name):
+    """The profile with all its variants."""
+    variants = profiles[name].get("variants")
+    return make_ref(name, variants) if variants else name
+
+
+def variant_refs(profiles):
+    """What can be installed on its own: each profile, each variant for a profile with
+    variants."""
+    for name, profile in profiles.items():
+        if profile.get("variants"):
+            yield from (make_ref(name, [v]) for v in profile["variants"])
+        else:
+            yield name
+
+
+def units(profiles, refs):
+    """(profile, variant) parts of some references, None for the common items."""
+    found = set()
+    for ref in refs:
+        name, variants = selected(profiles, ref)
+        found.update([(name, None), *((name, v) for v in variants)])
+    return found
+
+
+def own_part(profiles, name, variants, section, common=True):
+    """(label, item) written in the profile itself for these variants: the common items (unless
+    `common` is false) labelled with its name, those of the variants with name[variant]."""
+    for item in profiles[name].get(section, []):
+        tags = item_variants(item)
+        if not tags:
+            if common:
+                yield name, item
+        elif hits := [v for v in variants if v in tags]:
+            yield make_ref(name, hits), item
 
 
 def resolve(profiles, names):
-    """Merges the requested profiles and their `extends` (parents first, each one once)."""
+    """Merges the requested profiles (references, see selected) and their `extends` (parents
+    first, each part once)."""
     merged = {section: [] for section in SECTIONS}
-    visited = set()
+    visited = set()  # (profile, variant or None for the common items)
 
-    def visit(name, stack):
+    def visit(ref, stack):
+        name, _ = parse_ref(ref)
         if name in stack:
             sys.exit("!! " + t("Cycle in 'extends': {cycle}", cycle=" -> ".join([*stack, name])))
-        if name not in profiles:
-            sys.exit("!! " + t("Unknown profile: '{name}' (available: {available})",
-                               name=name, available=", ".join(profiles)))
-        if name in visited:
-            return
-        visited.add(name)
-        profile = profiles[name]
-        for parent in profile.get("extends", []):
-            visit(parent, [*stack, name])
+        _, variants = selected(profiles, ref)
+        first = (name, None) not in visited
+        variants = [v for v in variants if (name, v) not in visited]
+        visited.update([(name, None), *((name, v) for v in variants)])
+        for parent in profiles[name].get("extends", []):
+            # Each time: new variants of the profile may bring new variants of its parents.
+            if first or variants:
+                visit(parent_ref(profiles, parent, name, variants), [*stack, name])
         for section in SECTIONS:
-            for item in profile.get(section, []):
-                merged[section].append((name, item))
+            merged[section] += own_part(profiles, name, variants, section, common=first)
 
     for name in names:
         visit(name, [])
@@ -893,7 +1019,7 @@ def adopt_existing(profiles, paths):
     items = {}
     for name in profiles:
         try:
-            targets = installed_by(resolve(profiles, [name]), paths)
+            targets = installed_by(resolve(profiles, [all_variants(profiles, name)]), paths)
         except (ConfigError, SystemExit):
             continue
         for path, (kind, _, link) in targets.items():
@@ -1448,28 +1574,35 @@ def print_json(data):
     print(json.dumps(data, ensure_ascii=False))
 
 
-def profile_state(profiles, name, paths, memo=None):
-    """installed: everything is there, extends included. Otherwise, the state depends on the
+def profile_state(profiles, ref, paths, memo=None):
+    """State of a profile reference (see selected). installed: everything is there, extends
+    included. Otherwise, the state depends on the
     profile's own items (those it does not already inherit from a parent): partial if one of
     them is present, missing otherwise. An installed parent (e.g. comfyui-common, shared by
     many) therefore does not make the profiles inheriting from it "partial". A profile without
-    items of its own, which only groups other profiles (e.g. minimax-h3-all-*), is judged on the
-    items of its parents outside the base they all share (e.g. minimax-h3-common-*): it is thus
+    items of its own, which only groups other profiles (e.g. minimax-h3-all), is judged on the
+    items of its parents outside the base they all share (e.g. minimax-h3-common): it is thus
     consistent with each of them. Failing that (a single parent), it takes the state of its
     direct parents: partial if one of them is installed or partial. empty: installs no file (pip
-    only, or only custom nodes outside the manager, see foreign_node). error: invalid config."""
+    only, or only custom nodes outside the manager, see foreign_node). error: invalid config.
+    For a variant, the profile's common items count as inherited: another variant already
+    installed does not make it "partial"."""
     memo = {} if memo is None else memo
-    if name in memo:
-        return memo[name]
+    key = ref
+    if key in memo:
+        return memo[key]
     try:
-        everything = installed_by(resolve(profiles, [name]), paths)
+        name, variants = selected(profiles, ref)
+        ref = canonical(profiles, ref)
+        everything = installed_by(resolve(profiles, [ref]), paths)
         inherited = set()
-        for parent in ancestors(profiles, [name]) - {name}:
+        for parent in ancestors(profiles, [ref]) - {ref} | ({make_ref(name, [])} if variants else set()):
             inherited.update(installed_by(resolve(profiles, [parent]), paths))
     except (ConfigError, SystemExit):
-        return memo.setdefault(name, "error")
+        return memo.setdefault(key, "error")
     own = {path: target for path, target in everything.items() if path not in inherited}
-    extends = profiles[name].get("extends", [])
+    # Parents with the variants they get from this reference (see parent_ref).
+    extends = [parent_ref(profiles, p, name, variants) for p in profiles[name].get("extends", [])]
     if not own and len(extends) > 1:
         base = set.intersection(*(ancestors(profiles, [p]) for p in extends))
         shared = set()
@@ -1485,11 +1618,23 @@ def profile_state(profiles, name, paths, memo=None):
     else:
         parents = [profile_state(profiles, p, paths, memo) for p in extends]
         state = "partial" if any(s in ("installed", "partial") for s in parents) else "missing"
-    return memo.setdefault(name, state)
+    return memo.setdefault(key, state)
+
+
+def overall_state(states):
+    """State of a profile with variants, from those of its variants: installed if one of them
+    is."""
+    for state in ("installed", "partial"):
+        if state in states:
+            return state
+    for state in ("error", "empty"):
+        if states and all(s == state for s in states):
+            return state
+    return "missing"
 
 
 def profile_total(profiles, name, paths=None):
-    """(total size of the files in bytes, number of files of unknown size), extends included,
+    """Of a profile reference: (total size of the files in bytes, number of files of unknown size), extends included,
     each file counted once. Custom nodes and pip packages don't count. With `paths`, only the
     missing files: what installing the profile would add."""
     merged = resolve(profiles, [name])
@@ -1512,10 +1657,10 @@ def profile_total(profiles, name, paths=None):
 
 
 def profile_items(profiles, name):
-    """Names of a profile's items, extends included, each one once (for the panel's filter):
-    custom nodes, pip packages, "type/file" of models and workflows."""
+    """Names of a profile's items, extends and all variants included, each one once (for the
+    panel's filter): custom nodes, pip packages, "type/file" of models and workflows."""
     try:
-        merged = resolve(profiles, [name])
+        merged = resolve(profiles, [all_variants(profiles, name)])
         names = [custom_node_name(item, f"[{profile}] custom_nodes")
                  for profile, item in merged["custom_nodes"]]
         names += [spec for _, spec in merged["pip"]]
@@ -1558,9 +1703,44 @@ def unmanaged_items(profiles, names, paths, manifest):
 
 def count_unmanaged(profiles, name, paths, manifest):
     try:
-        return len(unmanaged_items(profiles, [name], paths, manifest))
+        return len(unmanaged_items(profiles, [all_variants(profiles, name)], paths, manifest))
     except (ConfigError, SystemExit):
         return 0
+
+
+def sizes_json(profiles, ref, paths):
+    # Total computed from the file sizes, to show it in the panel's language ("size" is the text
+    # written by profile_sizes.py), and the share of it that installing would add (missing files).
+    return {**dict(zip(("total", "unknown"), safe_total(profiles, ref))),
+            **dict(zip(("todo", "todo_unknown"), safe_total(profiles, ref, paths)))}
+
+
+def profile_json(profiles, name, paths, manifest, states):
+    profile = profiles[name]
+    entry = {
+        "description": profile.get("description", ""),
+        "size": profile.get("size", ""),
+        **sizes_json(profiles, name, paths),
+        "extends": profile.get("extends", []),
+        "items": profile_items(profiles, name),
+        "counts": {s: len(profile.get(s, [])) for s in SECTIONS},
+        "state": profile_state(profiles, name, paths, states),
+        "unmanaged": count_unmanaged(profiles, name, paths, manifest),
+    }
+    if profile.get("variants"):
+        # Each variant: its own state and size (common items and extends included).
+        entry["variants"] = [
+            {"name": v, "state": profile_state(profiles, make_ref(name, [v]), paths, states),
+             **sizes_json(profiles, make_ref(name, [v]), paths)}
+            for v in profile["variants"]
+        ]
+        entry["default_variant"] = profile.get("default_variant")
+        # The profile named without brackets (common items, and the default variant if any),
+        # and its common items alone (name[]).
+        entry["ref_state"] = entry["state"]
+        entry["common_state"] = profile_state(profiles, make_ref(name, []), paths, states)
+        entry["state"] = overall_state([v["state"] for v in entry["variants"]])
+    return entry
 
 
 def cmd_list(profiles, args):
@@ -1570,23 +1750,7 @@ def cmd_list(profiles, args):
         print_json({
             **config_location(args.config),
             "default": split_names(os.environ.get("COMFY_PROFILES")),
-            "profiles": {
-                name: {
-                    "description": profile.get("description", ""),
-                    "size": profile.get("size", ""),
-                    # Total computed from the file sizes, to show it in the panel's language;
-                    # "size" is the text written by profile_sizes.py.
-                    **dict(zip(("total", "unknown"), safe_total(profiles, name))),
-                    # Share of this total that installing the profile would add (missing files).
-                    **dict(zip(("todo", "todo_unknown"), safe_total(profiles, name, paths))),
-                    "extends": profile.get("extends", []),
-                    "items": profile_items(profiles, name),
-                    "counts": {s: len(profile.get(s, [])) for s in SECTIONS},
-                    "state": profile_state(profiles, name, paths, states),
-                    "unmanaged": count_unmanaged(profiles, name, paths, manifest),
-                }
-                for name, profile in profiles.items()
-            },
+            "profiles": {name: profile_json(profiles, name, paths, manifest, states) for name in profiles},
         })
         return
     for name, profile in profiles.items():
@@ -1594,8 +1758,15 @@ def cmd_list(profiles, args):
         counts = ", ".join(f"{len(profile.get(s, []))} {s}" for s in SECTIONS if profile.get(s))
         suffix = f"  (extends: {', '.join(extends)})" if extends else ""
         print(f"- {name}{suffix}")
-        if profile.get("size"):
-            print("    " + t("size: {size}", size=profile["size"]))
+        if profile.get("variants"):
+            default = profile.get("default_variant")
+            print("    " + t("variants: {variants}", variants=", ".join(
+                f"{v} ({t('default')})" if v == default else v for v in profile["variants"])))
+        size = profile.get("size")
+        if isinstance(size, dict):
+            size = ", ".join(f"{v}: {text}" for v, text in size.items())
+        if size:
+            print("    " + t("size: {size}", size=size))
         if profile.get("description"):
             print(f"    {profile['description']}")
         if counts:
@@ -1615,13 +1786,19 @@ def cmd_show(profiles, args):
             unmanaged = {(kind, label) for kind, label, _ in unmanaged_items(profiles, names, paths, manifest).values()}
     except ConfigError as e:
         sys.exit(f"!! {e}")
-    # Grouped by the profile declaring them: the requested ones first, then the inherited
-    # profiles in resolve() order (parents before children).
-    order = list(dict.fromkeys([*names, *(st[3] for st in status)]))
-    status = sorted(status, key=lambda st: order.index(st[3]))
+    # Grouped by the profile (or variant: profile[variant]) declaring them: the requested ones
+    # first, then the inherited profiles in resolve() order (parents before children).
+    requested = list(dict.fromkeys(parse_ref(n)[0] for n in names))
+    order = list(dict.fromkeys(st[3] for st in status))
+
+    def rank(label):
+        base = parse_ref(label)[0]
+        return requested.index(base) if base in requested else len(requested), order.index(label)
+
+    status = sorted(status, key=lambda st: rank(st[3]))
     if args.json:
         print_json([{"kind": kind, "name": name, "missing": missing, "profile": profile,
-                     "inherited": profile not in names, "unmanaged": (kind, name) in unmanaged,
+                     "inherited": parse_ref(profile)[0] not in requested, "unmanaged": (kind, name) in unmanaged,
                      "size": size, "link": link and {"site": link[0], "url": link[1]}}
                     for kind, name, missing, profile, size, link in status])
         return
@@ -1629,7 +1806,7 @@ def cmd_show(profiles, args):
     for kind, name, missing, profile, size, _ in status:
         if profile != current:
             current = profile
-            lines.append(f"[{profile}]" + ("" if profile in names else " " + t("(inherited)")))
+            lines.append(f"[{profile}]" + ("" if parse_ref(profile)[0] in requested else " " + t("(inherited)")))
         todo = t("to download") if kind in ("model", "workflow") else t("to install")
         state = (todo if missing else t("present, not managed") if (kind, name) in unmanaged
                  else t("present"))
@@ -1826,14 +2003,18 @@ def installed(path, link):
 
 
 def ancestors(profiles, names):
-    """The profiles and everything they inherit from (extends)."""
+    """The profiles and everything they inherit from (extends), as canonical references."""
     found = set()
 
-    def visit(name):
-        if name in profiles and name not in found:
-            found.add(name)
+    def visit(ref):
+        if parse_ref(ref)[0] not in profiles:
+            return
+        name, variants = selected(profiles, ref)
+        ref = canonical(profiles, ref)
+        if ref not in found:
+            found.add(ref)
             for parent in profiles[name].get("extends", []):
-                visit(parent)
+                visit(parent_ref(profiles, parent, name, variants))
 
     for name in names:
         visit(name)
@@ -1863,11 +2044,15 @@ def remove(path, link, paths):
 
 
 def own_items(profiles, names):
-    """Like resolve(), but only the items written in the profiles themselves, without those they
-    inherit from (extends)."""
+    """Like resolve(), but only the items written in the profiles themselves (common ones and
+    those of the requested variants), without those they inherit from (extends)."""
     resolve(profiles, names)  # validates the names and the extends
-    return {section: [(name, item) for name in names for item in profiles[name].get(section, [])]
-            for section in SECTIONS}
+    merged = {section: [] for section in SECTIONS}
+    for ref in names:
+        name, variants = selected(profiles, ref)
+        for section in SECTIONS:
+            merged[section] += own_part(profiles, name, variants, section)
+    return merged
 
 
 def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
@@ -1878,22 +2063,32 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
     By default, only the items of `names` themselves go: the profiles they inherit from
     (extends) are kept profiles like the others. With `with_extends`, these inherited profiles
     are uninstalled too (so they protect nothing): their items go, unless another kept profile
-    uses them."""
-    startup = split_names(os.environ.get("COMFY_PROFILES"))
-    if with_extends:
-        inherited = ancestors(profiles, names)
-        targets = installed_by(resolve(profiles, names), paths)
-    else:
-        inherited = set(names)
-        targets = installed_by(own_items(profiles, names), paths)
+    uses them.
 
-    keep = [n for n in profiles if n not in names and n in startup]
-    for name in profiles:
-        if name in names or name in keep or name in inherited:
+    Profiles with variants: each variant counts as a profile of its own, along with the
+    profile's common items. Uninstalling one variant thus keeps the common items as long as
+    another variant stays installed."""
+    startup = split_names(os.environ.get("COMFY_PROFILES"))
+    targets = installed_by((resolve if with_extends else own_items)(profiles, names), paths)
+    requested = units(profiles, names)
+    removing = units(profiles, ancestors(profiles, names)) if with_extends else requested
+
+    def leaving(ref, among):
+        try:
+            return units(profiles, [ref]) <= among
+        except SystemExit:  # invalid reference in COMFY_PROFILES: ignored
+            return True
+
+    keep = [ref for ref in startup if not leaving(ref, requested)]
+    for ref in variant_refs(profiles):
+        if ref in keep or leaving(ref, removing):
             continue
-        theirs = installed_by(resolve(profiles, [name]), paths)
+        try:
+            theirs = installed_by(resolve(profiles, [ref]), paths)
+        except (ConfigError, SystemExit):
+            continue
         if theirs and all(installed(path, link) for path, (_, _, link) in theirs.items()):
-            keep.append(name)
+            keep.append(ref)
 
     needed = {}  # path -> kept profiles using it
     for name in keep:
@@ -1917,10 +2112,11 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
         "unmanaged": unmanaged,
         # Only those actually protecting something.
         "keep_profiles": [n for n in keep if any(n in k["by"] for k in kept)],
-        "startup": [n for n in names if n in startup],
+        # Those of COMFY_PROFILES uninstalled entirely: reinstalled at the next startup.
+        "startup": [ref for ref in startup if parse_ref(ref)[0] in profiles and leaving(ref, requested)],
         "with_extends": with_extends,
         # Profiles inherited by the uninstalled ones: left in place without with_extends.
-        "extends": sorted(ancestors(profiles, names) - set(names)),
+        "extends": sorted(ancestors(profiles, names) - {canonical(profiles, n) for n in names}),
     }
 
 

@@ -7,7 +7,8 @@ header for a direct URL or a file in a GitHub repository. Only files without "si
 queried, unless --force queries them all again. Then writes in the config:
   - "size" (bytes) on each file;
   - "size" (human-readable, e.g. "89.4 GB") on each profile: total of its files, extends
-    included, each file counted once. Custom nodes and pip packages are not counted (a profile
+    included, each file counted once; for a profile with variants, one per variant
+    ({"int8": "18.9 GB", "bf16": "35.7 GB"}). Custom nodes and pip packages are not counted (a profile
     with only those has no size).
 
 Usage:
@@ -235,13 +236,19 @@ def main():
         sys.exit(f"!! {e}")
 
     for name in list(profiles):
-        total, unknown = cp.profile_total(profiles, name)
-        if not total and not unknown:  # only custom nodes / pip packages
-            profiles[name].pop("size", None)
-            continue
-        size = profile_size_text(total, unknown)
+        variants = profiles[name].get("variants")
+        if variants:  # a size per variant: {"int8": "18.9 GB", ...}
+            size = {v: profile_size_text(*cp.profile_total(profiles, cp.make_ref(name, [v])))
+                    for v in variants}
+            shown = ", ".join(f"{v}: {text}" for v, text in size.items())
+        else:
+            total, unknown = cp.profile_total(profiles, name)
+            if not total and not unknown:  # only custom nodes / pip packages
+                profiles[name].pop("size", None)
+                continue
+            size = shown = profile_size_text(total, unknown)
         profiles[name] = with_profile_size(profiles[name], size)
-        print(f"   {name:<24} {size}")
+        print(f"   {name:<24} {shown}")
 
     if failures:
         print("!! " + t("{n} size(s) not found:", n=len(failures)), file=sys.stderr)

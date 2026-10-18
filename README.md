@@ -126,6 +126,45 @@ be used as comments.)
   is detected automatically; an unencrypted zip is extracted without a password.
 - An unknown key (typo) makes the command fail before any action.
 
+### Variants
+
+Several variants of the same models (quantizations `int8`, `fp8`, `bf16`...) fit in a single
+profile: `variants` lists them, and each item tagged with `variant` (a name, or a list for an
+item shared by several variants) only belongs to these variants. Items without `variant` are
+common to all of them.
+
+```jsonc
+"krea2-raw": {
+  "extends": ["krea2-common"],
+  "variants": ["int8", "fp8", "bf16"],
+  "default_variant": "int8",           // optional
+  "models": [
+    {"type": "loras/krea2", "hf": "Comfy-Org/Krea-2", "file": "loras/krea2_turbo_lora_rank_64_bf16.safetensors"},
+    {"variant": "int8", "type": "diffusion_models/krea2", "hf": "Comfy-Org/Krea-2", "file": "diffusion_models/krea2_raw_int8_convrot.safetensors"},
+    {"variant": "bf16", "type": "diffusion_models/krea2", "hf": "Comfy-Org/Krea-2", "file": "diffusion_models/krea2_raw_bf16.safetensors"}
+  ]
+}
+```
+
+A profile is then named with the variants to install between brackets, everywhere a profile
+name is expected (command line, `COMFY_PROFILES`, `extends`, Workflow profiles node):
+
+- `krea2-raw[int8]`: the common items and those of `int8`;
+- `krea2-raw[int8,bf16]`: the common items and those of both variants;
+- `krea2-raw`: the common items and those of `default_variant`, or only the common items if the
+  profile has no default variant;
+- `krea2-raw[]`: only the common items.
+
+Variants follow `extends`: a parent named without brackets that declares variants gets those
+of the child (the ones it has). `minimax-h3-fl2va[bf16]`, which extends `minimax-h3-common`,
+thus installs `minimax-h3-common[bf16]`. A profile without variants gets the parent's default
+variant. Brackets in `extends` take precedence: `"extends": ["minimax-h3-common[]"]` only takes
+the common items, `"extends": ["minimax-h3-common[int8]"]` always takes `int8`.
+
+Each variant has its own state and size. A variant does not become "partially installed"
+because another one is installed (the common items count as inherited). `profile_sizes.py`
+writes one size per variant: `"size": {"int8": "19.3 GB", "bf16": "36.1 GB"}`.
+
 ## What is installed, what is removed
 
 `sync` installs what is missing and never touches what is already there (except with
@@ -149,7 +188,9 @@ installed profile, including those they inherit from. Example: uninstalling `kre
 inherits from `krea2-common`) removes its diffusion model, but keeps the text encoder and the
 VAE of `krea2-common`. With `--with-extends` ("Include the inherited profiles" checkbox in the
 panel), the inherited profiles are uninstalled too: this is what a profile that only groups
-other profiles needs. pip packages are never removed.
+other profiles needs. pip packages are never removed. For a profile with variants, each
+variant counts as a profile of its own: uninstalling `krea2-raw[bf16]` removes the files of
+`bf16`, and its common items only if no other variant of the profile stays installed.
 
 For `uninstall` to still remove what was already there, **take it over**: `adopt PROFILE`
 (the profile's "link" button in the panel) adds to the manifest everything present for the
@@ -190,7 +231,9 @@ into the manifest at the first use (that storage is only filled by the manager).
 The **Workflow profiles** node (*utils* category) declares in a workflow the profiles it
 needs. The information travels with the workflow: whoever receives it knows what to install.
 
-- **profiles**: profile names, comma-separated (`krea2, essential-nodes`).
+- **profiles**: profile names, comma-separated (`krea2-turbo, essential-nodes`), with their
+  variants between brackets if needed (`krea2-turbo[int8], krea2-raw[int8,bf16]`, see
+  [Variants](#variants)).
 - **source** (optional): URL of the profiles file that defines them, for instance a raw GitHub
   link. A profile name only makes sense within a given profiles file: without a source, the
   declaration is only useful to those who already have these profiles.
@@ -222,17 +265,21 @@ missing message stays in English.
 ## Panel
 
 - Profile list: description, size, `extends`, *startup* badge for those of `COMFY_PROFILES`.
+  A profile with variants keeps a single card, with one chip per variant (state color, size,
+  ★ for the default variant): the ticked variants are those the card's buttons, and the
+  buttons under the list for a checked profile, apply to (`krea2-raw[int8,bf16]`). Its details
+  group the items by variant.
   For a profile that is not fully installed, a blue *… to download* badge gives the size of the
   missing files that installing it would add (`extends` included; custom nodes and pip
   packages are not counted). The background color gives the state: green installed
   (everything is there, `extends` included), orange partial, neutral not installed. Only the
   profile's own items count for "partial", not the inherited ones; a profile that only groups
   other profiles is judged on their items outside the base they all share (for
-  `minimax-h3-all-bf16`: the fl2va and ref2va models, not `minimax-h3-common-bf16`).
+  `minimax-h3-all[bf16]`: the fl2va and ref2va models, not `minimax-h3-common[bf16]`).
 - List filters, remembered in the browser: text on the names of the profiles and of their
   items (`extends` included), or on the profile names only; final profiles only (those no
   other profile extends), optionally with those extended only by a grouping profile (without
-  items of its own, e.g. `minimax-h3-all-*`); state, by clicking *installed*, *partially
+  items of its own, e.g. `minimax-h3-all`); state, by clicking *installed*, *partially
   installed* or *not installed* in the legend (several at once possible), and *not managed*
   for the profiles that have unmanaged items. A checked profile stays shown.
 - Buttons per profile: install (if it is not fully installed), uninstall (if it is, even

@@ -43,7 +43,9 @@ SCRIPT = Path(os.environ.get("COMFY_PROFILES_SCRIPT") or Path(__file__).parent /
 SIZES_SCRIPT = Path(__file__).parent / "profile_sizes.py"
 API = "/comfy-profiles"
 EVENT = "comfy-profiles.log"
-PROFILE_NAME = re.compile(r"[\w.-]+")
+# A profile, optionally with variants: krea2-turbo, krea2-raw[int8,bf16], krea2-raw[] (common
+# items only), see comfy_profiles.py.
+PROFILE_NAME = re.compile(r"[\w.-]+(\[([\w.-]+(,[\w.-]+)*)?\])?")
 MAX_LOG_LINES = 5000
 ACTIONS = ("sync", "uninstall", "sizes")
 # After SIGINT (clean stop), delay before killing the script and its subprocesses.
@@ -133,8 +135,9 @@ async def cli_json(*args, request, config=None):
 
 
 def profile_names(value, request):
-    names = value if isinstance(value, list) else str(value or "").split(",")
-    names = [n.strip() for n in names if n.strip()]
+    # Commas separate the profiles, except between brackets (variants).
+    names = value if isinstance(value, list) else re.split(r",(?![^\[]*\])", str(value or ""))
+    names = [re.sub(r"\s+", "", str(n)) for n in names if str(n).strip()]
     if not names or not all(PROFILE_NAME.fullmatch(n) for n in names):
         raise bad_request(tr(request)("invalid profile names"))
     return names
@@ -351,8 +354,12 @@ async def save_config(text, origin, request):
     """Validates `text` on a copy, then replaces the writable profiles file (the user's one when
     the template was active)."""
     try:
-        names = list(json.loads(text).get("profiles") or {})
-    except (json.JSONDecodeError, AttributeError) as e:
+        profiles = json.loads(text).get("profiles") or {}
+        # Each profile with all its variants, so that all their items are checked.
+        names = [f"{name}[{','.join(p['variants'])}]"
+                 if isinstance(p, dict) and isinstance(p.get("variants"), list) and p["variants"] else name
+                 for name, p in profiles.items()]
+    except (json.JSONDecodeError, AttributeError, TypeError) as e:
         return json_error(400, tr(request)("Invalid JSON: {error}", error=e))
     _, _, path = await config_info(request)
     path.parent.mkdir(parents=True, exist_ok=True)

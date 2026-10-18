@@ -17,15 +17,38 @@
   "patternProperties": {"^//": {}},
   "additionalProperties": false,
   "$defs": {
+    "variant": {
+      "description": "Variant(s) of the profile this item belongs to (see variants). Without it: common to all the variants.",
+      "oneOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      ]
+    },
     "profile": {
       "type": "object",
       "properties": {
         "description": {"type": "string", "description": "Free text, shown in the panel and by `list`."},
-        "size": {"type": "string", "description": "Total size, computed by profile_sizes.py (informative)."},
+        "size": {
+          "description": "Total size, computed by profile_sizes.py (informative); one per variant for a profile with variants.",
+          "oneOf": [
+            {"type": "string"},
+            {"type": "object", "additionalProperties": {"type": "string"}}
+          ]
+        },
         "extends": {
           "type": "array",
-          "description": "Profiles whose whole content this one includes.",
-          "items": {"type": "string"}
+          "description": "Profiles whose whole content this one includes; name[variant,...] picks variants of a profile with variants (without brackets: its default_variant).",
+          "items": {"type": "string", "pattern": "^[\\w.-]+(\\[[\\w.-]+(,[\\w.-]+)*\\])?$"}
+        },
+        "variants": {
+          "type": "array",
+          "description": "Variants of the profile (e.g. int8, fp8, bf16): its items tagged with \"variant\" belong to these variants only, the others are common to all of them. Installed with name[variant,...].",
+          "items": {"type": "string", "pattern": "^[\\w.-]+$"},
+          "uniqueItems": true
+        },
+        "default_variant": {
+          "type": "string",
+          "description": "Variant installed when the profile is named without brackets. Without it, only the common items are."
         },
         "models": {"type": "array", "items": {"$ref": "#/$defs/model"}},
         "workflows": {"type": "array", "items": {"$ref": "#/$defs/file"}},
@@ -50,7 +73,8 @@
         "file": {"type": "string", "description": "Path of the file in the repository (hf, github)."},
         "revision": {"type": "string", "description": "Branch, tag or commit (hf, github)."},
         "name": {"type": "string", "description": "Local file name. Default: the name of file (hf, github)."},
-        "size": {"type": "integer", "description": "Size in bytes, computed by profile_sizes.py."}
+        "size": {"type": "integer", "description": "Size in bytes, computed by profile_sizes.py."},
+        "variant": {"$ref": "#/$defs/variant"}
       },
       "oneOf": [
         {"required": ["hf", "file"]},
@@ -73,7 +97,8 @@
         "git": {"type": "string", "description": "URL of the git repository."},
         "ref": {"type": "string", "description": "Branch, tag or commit (git only)."},
         "gdrive": {"type": "string", "description": "Public zip on Google Drive (share link or id), with name. Encrypted: GDRIVE_ZIP_PASSWORD."},
-        "name": {"type": "string", "description": "Folder name in custom_nodes/. Default: the name of the git repository."}
+        "name": {"type": "string", "description": "Folder name in custom_nodes/. Default: the name of the git repository."},
+        "variant": {"$ref": "#/$defs/variant"}
       },
       "oneOf": [
         {"required": ["git"], "not": {"required": ["gdrive"]}},
