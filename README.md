@@ -20,11 +20,11 @@ profiles** node in the *utils* category (see [Workflow profiles](#workflow-profi
 
 ## Contents
 
-- `comfy_profiles.py`: the profile manager, usable on its own from the command line.
-- `profile_sizes.py`: computes the size of each profile at the source (Hugging Face, CivitAI,
+- `comfy_profiles.py`: the profile manager, usable on its own from the command line. Its
+  `sizes` command computes the size of each profile at the source (Hugging Face, CivitAI,
   GitHub, URL), without downloading anything, and saves it in the profiles file.
 - `__init__.py`: `/comfy-profiles/*` HTTP routes added to the ComfyUI server; they run
-  `comfy_profiles.py` and `profile_sizes.py` as subprocesses, with ComfyUI's Python and paths.
+  `comfy_profiles.py` as a subprocess, with ComfyUI's Python and paths.
 - `profiles_node.py`: the *Workflow profiles* node.
 - `profiles_merge.py`: adds to the profiles file some profiles taken from another file.
 - `web/profiles.js`: the sidebar tab.
@@ -162,7 +162,7 @@ variant. Brackets in `extends` take precedence: `"extends": ["minimax-h3-common[
 the common items, `"extends": ["minimax-h3-common[int8]"]` always takes `int8`.
 
 Each variant has its own state and size. A variant does not become "partially installed"
-because another one is installed (the common items count as inherited). `profile_sizes.py`
+because another one is installed (the common items count as inherited). `comfy_profiles.py sizes`
 writes one size per variant: `"size": {"int8": "19.3 GB", "bf16": "36.1 GB"}`.
 
 ## What is installed, what is removed
@@ -294,7 +294,7 @@ missing message stays in English.
 - **This workflow** section, for a workflow that declares its profiles: see
   [Workflow profiles](#workflow-profiles).
 - Profiles file: edit, import (file or URL), export, back to template.
-- **Recalculate sizes**: runs `profile_sizes.py` on the profiles file (only the files without
+- **Recalculate sizes**: runs `comfy_profiles.py sizes` on the profiles file (only the files without
   a size are queried); **Recalculate all** also queries again those whose size is known
   (`--force`).
 - **Settings** (gear next to the title): download settings (see [Downloads](#downloads)) and
@@ -341,8 +341,8 @@ comfy_profiles.py [--config FILE] show PROFILE[,PROFILE...] [--json]
 comfy_profiles.py [--config FILE] sync [PROFILE[,PROFILE...]] [--update] [--jobs N] [--dry-run]
 comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json]
 comfy_profiles.py [--config FILE] adopt PROFILE[,PROFILE...] [--dry-run] [--json]
+comfy_profiles.py [--config FILE] sizes [--env FILE] [--force] [--dry-run]
 comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials]   # settings (JSON)
-profile_sizes.py [--config FILE] [--env FILE] [--force] [--dry-run]
 ```
 
 Run with ComfyUI's Python (dependencies get installed there). The ComfyUI folder is
@@ -353,7 +353,7 @@ container startup, before starting ComfyUI:
 COMFY_PROFILES=krea2,flux2-klein-9b python custom_nodes/comfyui-profiles/comfy_profiles.py sync
 ```
 
-`profile_sizes.py` only queries the files without a size (`--force`: all of them) and keeps
+`sizes` only queries the files without a size (`--force`: all of them) and keeps
 the file's formatting. `--env` takes `HF_TOKEN` / `CIVITAI_TOKEN` from a `.env` file when they
 are not in the environment. It also works outside any ComfyUI with `--config`, for instance on
 the `profiles.json` of a repository.

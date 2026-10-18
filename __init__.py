@@ -40,7 +40,6 @@ from .profiles_node import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 WEB_DIRECTORY = "./web"
 
 SCRIPT = Path(os.environ.get("COMFY_PROFILES_SCRIPT") or Path(__file__).parent / "comfy_profiles.py")
-SIZES_SCRIPT = Path(__file__).parent / "profile_sizes.py"
 API = "/comfy-profiles"
 EVENT = "comfy-profiles.log"
 # A profile, optionally with variants: krea2-turbo, krea2-raw[int8,bf16], krea2-raw[] (common
@@ -228,7 +227,7 @@ class Job:
         self.returncode, self.lines, self.stopping = None, {}, False
         if action == "sizes":  # all profiles, writes the sizes into the profiles file
             # force: also queries again the files whose size is already known.
-            cmd = [SIZES_SCRIPT] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
+            cmd = [SCRIPT, "sizes"] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
         else:
             cmd = [SCRIPT, action, ",".join(profiles)] + (["--dry-run"] if dry_run else [])
             if action == "uninstall" and with_extends:

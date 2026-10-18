@@ -29,7 +29,7 @@
       "properties": {
         "description": {"type": "string", "description": "Free text, shown in the panel and by `list`."},
         "size": {
-          "description": "Total size, computed by profile_sizes.py (informative); one per variant for a profile with variants.",
+          "description": "Total size, computed by `comfy_profiles.py sizes` (informative); one per variant for a profile with variants.",
           "oneOf": [
             {"type": "string"},
             {"type": "object", "additionalProperties": {"type": "string"}}
@@ -73,7 +73,7 @@
         "file": {"type": "string", "description": "Path of the file in the repository (hf, github)."},
         "revision": {"type": "string", "description": "Branch, tag or commit (hf, github)."},
         "name": {"type": "string", "description": "Local file name. Default: the name of file (hf, github)."},
-        "size": {"type": "integer", "description": "Size in bytes, computed by profile_sizes.py."},
+        "size": {"type": "integer", "description": "Size in bytes, computed by `comfy_profiles.py sizes`."},
         "variant": {"$ref": "#/$defs/variant"}
       },
       "oneOf": [
