@@ -124,16 +124,16 @@ const STYLE = `
 .cprof .details .group { margin-top: 6px; font-size: 12px; font-weight: 600;
   border-bottom: 1px solid var(--border-color); }
 .cprof .details .group ~ .item { margin-left: 8px; }
-/* Items of a variant, in the details: a block of their own, colored by the variant's state
-   (opaque, so as not to take the card's color). */
-.cprof .details .variant { --state: var(--border-color); border: 1px solid var(--border-color);
+/* Items of a variant or of an inherited profile, in the details: a block of their own, colored
+   by its state (opaque, so as not to take the card's color). */
+.cprof .details .block { --state: var(--border-color); border: 1px solid var(--border-color);
   border-left: 3px solid var(--state); border-radius: 6px; padding: 0 6px 4px; margin-top: 6px;
   background: var(--cp-surface); }
-.cprof .details .variant .group { margin-top: 3px; }
-.cprof .details .variant.installed { --state: var(--cp-ok);
+.cprof .details .block .group { margin-top: 3px; }
+.cprof .details .block.installed { --state: var(--cp-ok);
   background: color-mix(in srgb, var(--cp-ok) 12%, var(--cp-surface)); }
-.cprof .details .variant.partial { --state: var(--cp-partial); }
-.cprof .details .variant.error { --state: var(--cp-err);
+.cprof .details .block.partial { --state: var(--cp-partial); }
+.cprof .details .block.error { --state: var(--cp-err);
   background: color-mix(in srgb, var(--cp-err) 12%, var(--cp-surface)); }
 .cprof .item .name { flex: 1; word-break: break-all; }
 .cprof .item .size { white-space: nowrap; }
@@ -841,7 +841,7 @@ class ProfilesPanel {
         matches.get(name)?.length > 0 && el("div", { class: "muted match" },
           t("Contains: {items}", { items: matches.get(name).slice(0, 3).join(", ") +
             (matches.get(name).length > 3 ? ` (+${matches.get(name).length - 3})` : "") })),
-        this.expanded.has(name) && this.renderDetail(detail, p));
+        this.expanded.has(name) && this.renderDetail(detail));
     });
 
     const selection = [...this.selected];
@@ -1052,8 +1052,7 @@ class ProfilesPanel {
       }, t("Back to template")));
   }
 
-  // p: the profile's `list --json` entry, for the state of its variants.
-  renderDetail(detail, p) {
+  renderDetail(detail) {
     if (detail === null || detail === undefined) return el("div", { class: "details muted" }, t("Loading…"));
     if (detail.error) return el("div", { class: "details error" }, detail.error);
     if (!detail.length) return el("div", { class: "details muted" }, t("(empty profile)"));
@@ -1082,10 +1081,16 @@ class ProfilesPanel {
             el("span", { class: "muted" }, ` · ${group.items.filter((i) => !i.missing).length}/${group.items.length}`)),
           group.items.map((item) => this.renderItem(item)),
         ];
-        // A variant's items: in a block colored by its state (that of its chip).
-        return variants && !group.inherited && p?.variants
-          ? el("div", { class: `variant ${actionState(p, new Set(variants))}` }, content)
-          : content;
+        // Items of a variant, common to the variants, or of an inherited profile: in a block
+        // colored by its own state, that of the profile declaring them.
+        const owner = this.data?.profiles[parseRef(group.profile).name];
+        const state = !owner ? null
+          : variants && owner.variants ? actionState(owner, new Set(variants))
+          // Common items of a profile with variants (this one or an inherited one).
+          : owner.variants ? owner.common_state
+          // Inherited profile without variants; the profile's own items are the card itself.
+          : group.inherited ? owner.state : null;
+        return state ? el("div", { class: `block ${state}` }, content) : content;
       }));
   }
 
