@@ -4,6 +4,11 @@
 A profile describes everything a use case needs (models, custom nodes, workflows, pip
 packages) in a `profiles.json` file.
 
+**New here? Start with the [user guide](docs/guide.md)**: step-by-step examples, screenshots,
+`.env` files, command line and Docker.
+
+![The Profiles panel](docs/images/panel-overview.png)
+
 Works with any ComfyUI (manual install, comfy-cli, Docker image). For an example of
 integration in a Docker image, see
 [runpod-comfy-blackwell](https://github.com/jdelahayes/runpod-comfy-blackwell).
@@ -377,6 +382,15 @@ the `profiles.json` of a repository.
 | `GDRIVE_ZIP_PASSWORD` | encrypted zips of `gdrive` custom nodes | — |
 | `COMFY_PROFILES_LANG` | language of the messages (`en`, `fr`) | from the locale, otherwise `en` |
 | `COMFY_PROFILES_SCRIPT` | other `comfy_profiles.py` for the panel to use | the one of this repository |
+
+Tokens and passwords: see [Secrets](#secrets).
+
+## Secrets
+
+The panel neither asks for nor stores any secret: `HF_TOKEN` (or `hf auth login`),
+`CIVITAI_TOKEN` and `GDRIVE_ZIP_PASSWORD` are read from the environment of the ComfyUI server,
+so they must be set before ComfyUI starts. Examples of `.env` files and launchers for Linux,
+Windows (portable, PowerShell, Desktop) and Docker: [user guide, section 8](docs/guide.md#8-secrets-tokens-and-passwords).
 
 ## Integration in a Docker image
 
