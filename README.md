@@ -291,7 +291,10 @@ installed, then by the profile providing the most files of the workflow). Under 
 files of the workflow first, with the matching variant); **+** adds one to the node (merging
 the variants of a profile already declared, e.g. `flux3-klein[int8,bf16]`), or creates the node.
 When every field points to a file of a profile, a banner at the top gives the fewest profiles
-providing them all, declared at once with **Declare in the workflow**.
+providing them all, declared at once with **Declare in the workflow**. Under it, **Variant**
+shows the variants of the profiles with variants the workflow declares (otherwise of those the
+banner offers), with their state: a click declares that variant alone in the node
+(`flux3-klein[int8]` → `flux3-klein[bf16]`) and preselects again the fields' files for it.
 
 Profiles are declared in the node right away; the fields only change with **Apply**, undone with
 Ctrl+Z. ComfyUI then checks the missing models again: only the nodes whose chosen file is not

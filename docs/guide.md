@@ -380,8 +380,9 @@ the fields whose file is installed; for the others, once you install the workflo
 
 ### One workflow for every variant
 
-To use a workflow in another precision, declare the variant you want in the node, then check
-the models again. With `flux3-klein[bf16]` declared, the official int8 workflow of FLUX.3
+To use a workflow in another precision, click the variant you want next to **Variant**, at the
+top of the dialog: it is declared in the node in place of the previous one, and the fields are
+preselected again for its files. With `bf16` clicked, the official int8 workflow of FLUX.3
 [klein] is turned to the bf16 files:
 
 ![The same workflow turned to the bf16 variant](images/models-dialog-variant.png)

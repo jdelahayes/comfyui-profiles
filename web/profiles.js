@@ -188,6 +188,9 @@ const STYLE = `
 .cprof-dialog .cover.ok { border-color: color-mix(in srgb, var(--cp-ok) 45%, transparent);
   background: color-mix(in srgb, var(--cp-ok) 12%, var(--cp-surface)); color: var(--cp-ok); }
 .cprof-dialog .cover button i { font-size: 10px; }
+.cprof-dialog .switch { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; }
+.cprof-dialog .switch .chips { margin: 0; align-items: center; }
+.cprof-dialog .switch .name { font-family: monospace; margin-right: 2px; }
 .cprof-dialog span.provider.ok { color: var(--cp-ok); background: color-mix(in srgb, var(--cp-ok) 14%, transparent); }
 .cprof-dialog select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px; font-family: monospace;
   font-size: 12px; border: 1px solid var(--border-color); background: var(--comfy-input-bg); color: var(--input-text); }
@@ -556,6 +559,27 @@ function declareProfile(profiles, ref) {
   return node;
 }
 
+// Declares `name` with the single variant `variant` in the workflow's "Workflow profiles"
+// node (replacing the variants declared for it), or creates the node.
+function switchVariant(name, variant) {
+  const ref = `${name}[${variant}]`;
+  const node = workflowNodes().declaring[0];
+  if (!node) return addWorkflowNode([ref]);
+  const widget = node.widgets?.find((w) => w.name === "profiles");
+  if (!widget) return null;
+  const refs = splitRefs(String(widget.value ?? ""));
+  const i = refs.findIndex((r) => parseRef(r).name === name);
+  if (i < 0) refs.push(ref);
+  else refs[i] = ref;
+  const old = widget.value;
+  widget.value = refs.join(", ");
+  widget.callback?.(widget.value, app.canvas, node);
+  node.onWidgetChanged?.(widget.name, widget.value, old, widget);
+  node.setDirtyCanvas?.(true, true);
+  app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.checkState?.();
+  return node;
+}
+
 // Adds a "Workflow profiles" node declaring `refs`, where it is visible without overlapping
 // other nodes.
 function addWorkflowNode(refs) {
@@ -749,6 +773,33 @@ async function openModelDialog() {
               panel?.render();
               await render();
             } }, el("i", { class: "pi pi-plus" }), ` ${t("Declare in the workflow")}`));
+    // Variants of the profiles with variants the workflow declares (otherwise those the banner
+    // offers): a click declares that variant alone and turns the fields to its files.
+    const declaredRefs = workflowNeeds().filter((n) => n.valid && profiles[parseRef(n.name).name]?.variants)
+      .map((n) => n.name);
+    const switchable = declaredRefs.length ? declaredRefs
+      : (cover ?? []).filter((ref) => profiles[parseRef(ref).name]?.variants);
+    const variantBar = switchable.length > 0 && el("div", { class: "switch" },
+      el("span", { class: "muted" }, t("Variant:")),
+      switchable.map((ref) => {
+        const { name, variants } = parseRef(ref);
+        const p = profiles[name];
+        const current = new Set(variants ?? [p.default_variant]);
+        return el("span", { class: "chips" },
+          el("span", { class: "name" }, name),
+          p.variants.map((v) => el("span", {
+            class: `chip variant ${v.state}${current.has(v.name) ? " chosen" : ""}`,
+            title: current.has(v.name) && current.size === 1 ? `${name}[${v.name}]`
+              : t("Switch the workflow to {ref}", { ref: `${name}[${v.name}]` }),
+            onclick: async () => {
+              if (current.has(v.name) && current.size === 1) return;
+              switchVariant(name, v.name);
+              choices.clear();  // proposals made again for this variant
+              panel?.render();
+              await render();
+            },
+          }, `${v.name}${v.name === p.default_variant ? " ★" : ""}`)));
+      }));
     const pending = changes.filter((r) => !r.values.has(choices.get(r.key))).length;
     const undeclared = changes.filter((r) => !covered.has(choices.get(r.key))).length;
     const apply = el("button", { class: "primary", disabled: !changes.length, onclick: async () => {
@@ -769,6 +820,7 @@ async function openModelDialog() {
     } }, t("Apply ({n})", { n: changes.length }));
     body.replaceChildren(...[
       banner,
+      variantBar,
       el("div", { class: "muted" }, t("Files taken from all the profiles of your file, best match first; only the clear ones are preselected. “+ profile” declares it in the workflow's “Workflow profiles” node. Nothing changes in the fields before “Apply” (Ctrl+Z undoes it).")),
       table,
       undeclared > 0 && el("div", { class: "warn" },

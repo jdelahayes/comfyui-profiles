@@ -361,5 +361,7 @@
   "All the models of the workflow are provided by: {names}": "Tous les modèles du workflow sont fournis par : {names}",
   "Declare in the workflow": "Déclarer dans le workflow",
   "No model field to change.": "Aucun champ de modèle à modifier.",
-  "Tick at least one variant of: {names}": "Coche au moins une variante de : {names}"
+  "Tick at least one variant of: {names}": "Coche au moins une variante de : {names}",
+  "Variant:": "Variante :",
+  "Switch the workflow to {ref}": "Passer le workflow en {ref}"
 }
