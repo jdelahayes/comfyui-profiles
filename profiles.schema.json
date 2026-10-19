@@ -37,8 +37,8 @@
         },
         "extends": {
           "type": "array",
-          "description": "Profiles whose whole content this one includes; name[variant,...] picks variants of a profile with variants (without brackets: its default_variant).",
-          "items": {"type": "string", "pattern": "^[\\w.-]+(\\[[\\w.-]+(,[\\w.-]+)*\\])?$"}
+          "description": "Profiles whose whole content this one includes; name[variant,...] picks variants of a profile with variants (without brackets: its default_variant; name[]: common items only).",
+          "items": {"type": "string", "pattern": "^[\\w.-]+(\\[([\\w.-]+(,[\\w.-]+)*)?\\])?$"}
         },
         "variants": {
           "type": "array",
@@ -68,7 +68,7 @@
       "properties": {
         "hf": {"type": "string", "description": "Hugging Face repository (org/repo), with file."},
         "github": {"type": "string", "description": "Public GitHub repository (owner/repo or its URL), with file. Only the file is downloaded."},
-        "civitai": {"type": "integer", "description": "VERSION id of a CivitAI model (CIVITAI_TOKEN), with name."},
+        "civitai": {"type": ["integer", "string"], "pattern": "^[0-9]+$", "description": "VERSION id of a CivitAI model (CIVITAI_TOKEN), with name."},
         "url": {"type": "string", "description": "Direct URL, with name."},
         "file": {"type": "string", "description": "Path of the file in the repository (hf, github)."},
         "revision": {"type": "string", "description": "Branch, tag or commit (hf, github)."},
