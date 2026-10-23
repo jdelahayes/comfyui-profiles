@@ -74,6 +74,7 @@
         "revision": {"type": "string", "description": "Branch, tag or commit (hf, github)."},
         "name": {"type": "string", "description": "Local file name. Default: the name of file (hf, github)."},
         "size": {"type": "integer", "description": "Size in bytes, computed by `comfy_profiles.py sizes`."},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the file, written by `comfy_profiles.py sizes` when the source gives it (Hugging Face LFS, CivitAI): the same file installed in two places is reported."},
         "variant": {"$ref": "#/$defs/variant"}
       },
       "oneOf": [

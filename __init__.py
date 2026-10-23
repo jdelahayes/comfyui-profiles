@@ -396,7 +396,10 @@ async def fetch_config(url, request):
         raise bad_request(_("http(s) URL expected"))
     try:
         timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        # github.com/.../raw/... answers with a Content-Security-Policy header over aiohttp's
+        # default limit (8190 bytes) before redirecting to raw.githubusercontent.com.
+        async with aiohttp.ClientSession(timeout=timeout, max_line_size=65536,
+                                         max_field_size=65536) as session:
             async with session.get(url, headers={"User-Agent": "comfyui-profiles"}) as resp:
                 if resp.status != 200:
                     raise bad_request(f"{url} : HTTP {resp.status}")

@@ -43,8 +43,10 @@ folder, downloads keep their .part.
 see DOWNLOAD_SETTINGS), and partial downloads (--clean-partials: deletes them). Result as JSON.
 `sizes`: queries the size of each file at its source (Hugging Face, CivitAI, HTTP), without
 downloading anything, and writes it in the profiles file with each profile's total (one per
-variant), into the user's file when the config is the template. Only the files without a size
-are queried (--force: all of them). Tokens: $HF_TOKEN (otherwise the one from
+variant), into the user's file when the config is the template; also the sha256 of the models
+when the source gives it (Hugging Face LFS, CivitAI), then reports the same file installed in
+two places. Only the files without a size (or without a sha256 the source gives) are queried
+(--force: all of them). Tokens: $HF_TOKEN (otherwise the one from
 `hf auth login`) and $CIVITAI_TOKEN, otherwise those of the --env file (a deployment .env).
 --json (list, show, uninstall): result as JSON on stdout, information messages on stderr (used
 by the Profiles panel in ComfyUI).
@@ -2232,9 +2234,14 @@ def cmd_uninstall(profiles, args):
 # `sizes` queries the actual size of each file (models, workflows) at its source, without
 # downloading anything: Hugging Face API (paths-info), CivitAI API (model-versions), or the
 # Content-Length header for a direct URL or a file in a GitHub repository. Only the files
-# without "size" are queried (--force: all of them). Then writes in the profiles file "size"
-# (bytes) on each file, and "size" (human-readable) on each profile, see profile_total; for a
-# profile with variants, one per variant ({"int8": "18.9 GB", "bf16": "35.7 GB"}).
+# without "size" are queried, and the models without "sha256" whose source gives it (--force:
+# all of them). Then writes in the profiles file "size" (bytes) and "sha256" on each file, and
+# "size" (human-readable) on each profile, see profile_total; for a profile with variants, one
+# per variant ({"int8": "18.9 GB", "bf16": "35.7 GB"}). The sha256 (Hugging Face LFS files,
+# CivitAI) shows the same file installed in two places, see same_files.
+
+# Sources whose API gives the sha256 of a file.
+SHA256_SOURCES = ("hf", "civitai")
 
 TOKEN_KEYS = ("HF_TOKEN", "CIVITAI_TOKEN")
 
@@ -2260,9 +2267,18 @@ def http_json(url, data=None, token=None):
     if token:
         headers["Authorization"] = f"Bearer {token}"
     body = urllib.parse.urlencode(data, doseq=True).encode() if data else None
-    req = urllib.request.Request(url, data=body, headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.load(resp)
+    for _ in range(5):
+        req = urllib.request.Request(url, data=body, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            # urllib does not follow a 307/308 for a POST: a renamed Hugging Face repository
+            # answers paths-info that way.
+            if e.code not in (307, 308) or not e.headers.get("Location"):
+                raise
+            url = urllib.parse.urljoin(url, e.headers["Location"])
+    raise LookupError(t("too many redirects"))
 
 
 def hf_token():
@@ -2273,18 +2289,21 @@ def hf_token():
 
 
 def hf_sizes(repo, revision, files):
-    """Sizes of a batch of files from the same repository/revision, in one request."""
+    """{path: (size, sha256 or None)} of a batch of files from the same repository/revision,
+    in one request. The sha256 is that of an LFS file (the oid of a plain git file is a sha1)."""
     url = (
         f"https://huggingface.co/api/models/{repo}/paths-info/"
         f"{urllib.parse.quote(revision or 'main', safe='')}"
     )
     entries = http_json(url, data={"paths": files}, token=hf_token())
     # A path that does not exist is simply missing from the response.
-    return {e["path"]: (e.get("lfs") or {}).get("size", e.get("size")) for e in entries}
+    return {e["path"]: ((e.get("lfs") or {}).get("size", e.get("size")), (e.get("lfs") or {}).get("oid"))
+            for e in entries}
 
 
 def civitai_size(version_id):
-    """Size of the file served by /api/download/models/<id>: the primary file."""
+    """(size, sha256 or None) of the file served by /api/download/models/<id>: the primary
+    file."""
     token = os.environ.get("CIVITAI_TOKEN")
     url = f"https://civitai.com/api/v1/model-versions/{version_id}"
     data = http_json(f"{url}?token={token}" if token else url)
@@ -2292,7 +2311,8 @@ def civitai_size(version_id):
     primary = next((f for f in files if f.get("primary")), files[0] if files else None)
     if not primary or primary.get("sizeKB") is None:
         raise LookupError(t("no file in this version"))
-    return round(primary["sizeKB"] * 1024)
+    sha256 = (primary.get("hashes") or {}).get("SHA256")
+    return round(primary["sizeKB"] * 1024), sha256.lower() if sha256 else None
 
 
 def url_size(url):
@@ -2311,8 +2331,27 @@ def error_text(e):
     return str(e)
 
 
+def set_size(item, size, sha256=None):
+    """item["size"], and item["sha256"] right after it when known (format_config writes the
+    keys in their order)."""
+    if not sha256:
+        item["size"] = size
+        return
+    fields = {}
+    for key, value in item.items():
+        if key != "sha256":
+            fields[key] = value
+        if key == "size":
+            fields["sha256"] = sha256
+    fields["size"] = size
+    fields.setdefault("sha256", sha256)
+    item.clear()
+    item.update(fields)
+
+
 def fetch_sizes(items):
-    """items: list of (where, item). Fills in item["size"], returns the failures."""
+    """items: list of (where, item). Fills in item["size"] (and item["sha256"] when the source
+    gives it), returns the failures."""
     failures = []
     hf_groups = {}
     for where, item in items:
@@ -2322,9 +2361,9 @@ def fetch_sizes(items):
             continue
         try:
             if source == "civitai":
-                item["size"] = civitai_size(item["civitai"])
+                set_size(item, *civitai_size(item["civitai"]))
             else:
-                item["size"] = url_size(github_file_url(item) if source == "github" else item["url"])
+                set_size(item, url_size(github_file_url(item) if source == "github" else item["url"]))
         except Exception as e:
             failures.append(f"{where} {describe_source(item)} : {error_text(e)}")
 
@@ -2338,8 +2377,23 @@ def fetch_sizes(items):
             if sizes.get(item["file"]) is None:
                 failures.append(f"{where} {describe_source(item)} : " + t("file not found in the repository"))
             else:
-                item["size"] = sizes[item["file"]]
+                set_size(item, *sizes[item["file"]])
     return failures
+
+
+def same_files(profiles):
+    """{sha256: [destination, ...]} of the models whose same file (same sha256) is installed at
+    several destinations (<type>/<name>): to put in a shared folder."""
+    places = {}
+    for name, profile in profiles.items():
+        for i, item in enumerate(profile.get("models", [])):
+            if isinstance(item, dict) and item.get("sha256") and item.get("type"):
+                try:
+                    dest = f"{item['type'].strip('/')}/{target_name(item, f'[{name}] models[{i}]')}"
+                except ConfigError:
+                    continue
+                places.setdefault(item["sha256"], {}).setdefault(dest, []).append(name)
+    return {sha: dests for sha, dests in places.items() if len(dests) > 1}
 
 
 def profile_size_text(total, unknown):
@@ -2410,6 +2464,7 @@ def cmd_sizes(path, source, args):
         for section in ("models", "workflows")
         for item in profile.get(section, [])
         if args.force or not isinstance(item.get("size"), int)
+        or (section == "models" and not item.get("sha256") and any(k in item for k in SHA256_SOURCES))
     ]
     print(">> " + t("{n} size(s) to fetch", n=len(items)) + (" (--force)" if args.force else ""))
     try:
@@ -2434,6 +2489,15 @@ def cmd_sizes(path, source, args):
             size = shown = profile_size_text(total, unknown)
         profiles[name] = with_profile_size(profiles[name], size)
         print(f"   {name:<24} {shown}")
+
+    duplicates = same_files(profiles)
+    if duplicates:
+        print("?? " + t("{n} file(s) installed in several places (same sha256), to put in a shared "
+                        "folder:", n=len(duplicates)), file=sys.stderr)
+        for sha, dests in duplicates.items():
+            print(f"   {sha[:12]}", file=sys.stderr)
+            for dest, names in dests.items():
+                print(f"      {dest} <- {', '.join(dict.fromkeys(names))}", file=sys.stderr)
 
     if failures:
         print("!! " + t("{n} size(s) not found:", n=len(failures)), file=sys.stderr)
@@ -2493,7 +2557,7 @@ def main():
     settings.add_argument("--clean-partials", action="store_true",
                           help=t("deletes partial downloads (not during a sync)"))
     settings.add_argument("--json", action="store_true", help=t("JSON output (always)"))
-    sizes = sub.add_parser("sizes", help=t("query the file sizes at the source and write them, "
+    sizes = sub.add_parser("sizes", help=t("query the file sizes (and sha256) at the source and write them, "
                                            "with the profile totals, in the profiles file"))
     sizes.add_argument("--env", help=t(".env file to read HF_TOKEN / CIVITAI_TOKEN from"))
     sizes.add_argument("--force", action="store_true",

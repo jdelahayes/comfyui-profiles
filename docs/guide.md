@@ -184,8 +184,9 @@ added (`loras/styles`). Then exactly one source:
 Workflows go to `user/default/workflows/` and appear in ComfyUI's workflow browser.
 
 **5. Sizes.** Click **Recalculate sizes**: the panel asks each source for the size of its
-files (without downloading anything) and writes them in the file. The card then shows the
-total size, and how much is left to download.
+files (without downloading anything) and writes them in the file, with the `sha256` of the
+models when the source gives it (Hugging Face, CivitAI). The card then shows the total size,
+and how much is left to download.
 
 ### Sharing items between profiles: `extends`
 
@@ -601,6 +602,10 @@ with tokens taken from a `.env` file:
 ```bash
 python comfy_profiles.py --config profiles.json sizes --env deploy/.env
 ```
+
+With the `sha256`, `sizes` also reports the same file installed in two places: two families
+that ship the same text encoder or VAE (same sha256, under another folder). Put it in a shared
+profile that both extend, with a single `type`, e.g. `vae/flux2`, so that it is downloaded once.
 
 `python comfy_profiles.py --help` and `python comfy_profiles.py <command> --help` list all the
 options. Messages follow `COMFY_PROFILES_LANG` (`en`, `fr`), otherwise the system language.

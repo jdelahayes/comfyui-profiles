@@ -27,7 +27,8 @@ profiles** node in the *utils* category (see [Workflow profiles](#workflow-profi
 
 - `comfy_profiles.py`: the profile manager, usable on its own from the command line. Its
   `sizes` command computes the size of each profile at the source (Hugging Face, CivitAI,
-  GitHub, URL), without downloading anything, and saves it in the profiles file.
+  GitHub, URL), without downloading anything, and saves it in the profiles file, with the
+  `sha256` of the models (Hugging Face, CivitAI) to spot the same file installed twice.
 - `__init__.py`: `/comfy-profiles/*` HTTP routes added to the ComfyUI server; they run
   `comfy_profiles.py` as a subprocess, with ComfyUI's Python and paths.
 - `profiles_node.py`: the *Workflow profiles* node.
@@ -419,8 +420,9 @@ container startup, before starting ComfyUI:
 COMFY_PROFILES=krea2,flux2-klein-9b python custom_nodes/comfyui-profiles/comfy_profiles.py sync
 ```
 
-`sizes` only queries the files without a size (`--force`: all of them) and keeps
-the file's formatting. `--env` takes `HF_TOKEN` / `CIVITAI_TOKEN` from a `.env` file when they
+`sizes` only queries the files without a size, or the models without a `sha256` their source
+gives (`--force`: all of them), and keeps the file's formatting. It then lists the files
+installed in several places (same `sha256`, different `<type>/<name>`). `--env` takes `HF_TOKEN` / `CIVITAI_TOKEN` from a `.env` file when they
 are not in the environment. It also works outside any ComfyUI with `--config`, for instance on
 the `profiles.json` of a repository.
 
