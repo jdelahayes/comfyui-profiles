@@ -400,7 +400,13 @@ async def fetch_config(url, request):
             async with session.get(url, headers={"User-Agent": "comfyui-profiles"}) as resp:
                 if resp.status != 200:
                     raise bad_request(f"{url} : HTTP {resp.status}")
-                body = await resp.content.read(MAX_CONFIG_BYTES + 1)
+                # read(n) returns what has arrived (at most n bytes), not n bytes: read up to EOF
+                body = b""
+                while len(body) <= MAX_CONFIG_BYTES:
+                    chunk = await resp.content.read(MAX_CONFIG_BYTES + 1 - len(body))
+                    if not chunk:
+                        break
+                    body += chunk
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         raise bad_request(f"{url} : {e or type(e).__name__}")
     if len(body) > MAX_CONFIG_BYTES:
