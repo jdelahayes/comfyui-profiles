@@ -67,6 +67,18 @@ From the panel: **Edit**, **Import…** (file from your computer), **From a URL�
 GitHub or gist link: handy to keep your profiles in a repository), **Export**. An invalid file
 is rejected before anything is replaced.
 
+**From a URL…** first compares the remote file with yours, profile by profile: new, different
+(custom nodes, models, workflows and pip packages added `+`, removed `−` or changed `~`), only
+in your file, identical. Then:
+- **Merge**: adds or replaces only the ticked profiles (all the new and different ones by
+  default), plus the profiles they extend if you don't have them. Your other profiles stay.
+- **Replace all**: the remote file replaces yours, including deleting the profiles that are
+  only in yours.
+
+The import is refused if the remote file changed after the comparison. The panel remembers the
+last 10 URLs imported (`user/__comfy_profiles/remotes.json`): **Sync** next to one of them
+compares it again, ✕ forgets it.
+
 ### Format
 
 ```jsonc

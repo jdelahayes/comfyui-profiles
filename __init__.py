@@ -20,12 +20,14 @@ messages of the routes and of the script (COMFY_PROFILES_LANG) follow it. See pr
 import asyncio
 import codecs
 import functools
+import hashlib
 import json
 import logging
 import os
 import re
 import signal
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiohttp
@@ -34,7 +36,7 @@ from aiohttp import web
 from server import PromptServer
 
 from . import profiles_i18n as i18n
-from .profiles_merge import MergeError, merge
+from .profiles_merge import MergeError, compare, merge, update
 from .profiles_node import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
 WEB_DIRECTORY = "./web"
@@ -51,6 +53,9 @@ ACTIONS = ("sync", "uninstall", "sizes")
 STOP_TIMEOUT = 15
 # Import from a URL: maximum size of the profiles file.
 MAX_CONFIG_BYTES = 5 * 1024 * 1024
+# Import from a URL: the last URLs used, most recent first, in <user>/__comfy_profiles/remotes.json.
+REMOTES_NAME = "remotes.json"
+MAX_REMOTES = 10
 READONLY = os.environ.get("COMFY_PROFILES_READONLY", "").lower() in ("1", "true", "yes")
 
 LANG_HEADER = "Comfy-Profiles-Lang"
@@ -404,12 +409,88 @@ async def fetch_config(url, request):
     return body.decode("utf-8", errors="replace")
 
 
+def remotes_file():
+    return Path(folder_paths.get_user_directory()) / "__comfy_profiles" / REMOTES_NAME
+
+
+def load_remotes():
+    """[{"url", "date"}] of the last imports from a URL, most recent first ([] if unreadable)."""
+    try:
+        remotes = json.loads(remotes_file().read_text())
+        return [r for r in remotes if isinstance(r, dict) and isinstance(r.get("url"), str)]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def save_remotes(remotes):
+    path = remotes_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(remotes[:MAX_REMOTES], indent=2))
+    tmp.replace(path)
+
+
+@routes.get(f"{API}/config/remotes")
+async def get_remotes(_request):
+    return web.json_response({"remotes": load_remotes()})
+
+
+@routes.delete(f"{API}/config/remotes")
+@writes
+async def delete_remote(request):
+    """Forgets a URL of the list (all of them without `url`)."""
+    url = (await request.json()).get("url")
+    remotes = [r for r in load_remotes() if url is not None and r["url"] != url]
+    save_remotes(remotes)
+    return web.json_response({"remotes": remotes})
+
+
+def digest(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+@routes.post(f"{API}/config/compare-url")
+async def compare_config_url(request):
+    """What importing the file published at `url` would change: profiles new, different (item
+    by item), identical, and only in the local file. `sha256` is to be sent back to
+    /config/import-url, which refuses the import if the remote file has changed meanwhile."""
+    url = str((await request.json()).get("url") or "").strip()
+    source = await fetch_config(url, request)
+    path, origin, _ = await config_info(request)
+    try:
+        result = compare(path.read_text(), source, tr(request))
+    except MergeError as e:
+        return json_error(400, str(e))
+    return web.json_response({**result, "url": url, "sha256": digest(source), "source": origin})
+
+
 @routes.post(f"{API}/config/import-url")
 @writes
 async def import_config_url(request):
-    url = str((await request.json()).get("url") or "").strip()
+    """mode "replace" (default): the remote file replaces the profiles file; "merge": only the
+    `profiles` listed are taken from it (added, or replacing the local version)."""
+    body = await request.json()
+    url = str(body.get("url") or "").strip()
     text = await fetch_config(url, request)
-    return await save_config(text, t("import from {url}", url=url), request)
+    if body.get("sha256") and body["sha256"] != digest(text):
+        return json_error(409, tr(request)("{url} changed since the comparison: compare again", url=url))
+    result = {}
+    if body.get("mode") == "merge":
+        path, _, _ = await config_info(request)
+        try:
+            text, result = update(path.read_text(), text, profile_names(body.get("profiles"), request),
+                                  tr(request))
+        except MergeError as e:
+            return json_error(400, str(e))
+        origin = t("merge from {url}", url=url)
+    else:
+        origin = t("import from {url}", url=url)
+    response = await save_config(text, origin, request)
+    if response.status == 200:
+        date = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        save_remotes([{"url": url, "date": date}, *(r for r in load_remotes() if r["url"] != url)])
+        response = web.json_response({**json.loads(response.text), **result})
+    return response
 
 
 @routes.post(f"{API}/config/add-from-url")

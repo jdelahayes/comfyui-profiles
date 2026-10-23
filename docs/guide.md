@@ -115,7 +115,10 @@ From then on, this file is the one used. **Back to template** sets it aside
 Editing in the panel is handy for a quick fix. For more work, edit the file in a code editor:
 the `$schema` line gives validation and completion in VS Code. Then import it with
 **Import…**, or put it straight in `user/__comfy_profiles/` and click **Reload**. A file kept in
-a Git repository can be loaded with **From a URL…** (raw GitHub or gist link).
+a Git repository can be loaded with **From a URL…** (raw GitHub or gist link). The panel
+remembers the last URLs imported: after a push, **Sync** next to the URL shows what changed,
+profile by profile, and you choose: **Merge** the ticked profiles into your file, or
+**Replace all**.
 
 ### A first profile, step by step
 

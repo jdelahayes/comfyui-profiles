@@ -44,6 +44,17 @@ const STYLE = `
 .cprof h3 { margin: 0; font-size: 15px; }
 .cprof h4 { margin: 4px 0 0; font-size: 13px; border-bottom: 1px solid var(--border-color); }
 .cprof .field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; cursor: pointer; }
+.cprof input.url { flex: 1; min-width: 0; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid var(--border-color); background: var(--comfy-input-bg); color: var(--input-text); }
+.cprof .diff-row { display: flex; gap: 6px; align-items: flex-start; }
+.cprof .diff-row details { flex: 1; min-width: 0; }
+.cprof .diff-row summary { cursor: pointer; font-size: 12px; }
+.cprof .diff-row summary .name { font-family: monospace; font-weight: 600; }
+.cprof .diff-row summary span + span { margin-left: 4px; }
+.cprof .diff-row .item { word-break: break-all; }
+.cprof .diff-add { color: var(--cp-ok); }
+.cprof .diff-del { color: var(--cp-err); }
+.cprof .diff-mod { color: var(--cp-warn); }
 .cprof input.num { width: 64px; padding: 3px 5px; border-radius: 6px; border: 1px solid var(--border-color);
   background: var(--comfy-input-bg); color: var(--input-text); }
 .cprof .muted { color: var(--descrip-text, #999); font-size: 12px; }
@@ -1093,16 +1104,63 @@ class ProfilesPanel {
     input.click();
   }
 
-  async importUrl() {
-    const url = prompt(t("URL of the profiles file (e.g. a raw GitHub or gist link):"));
-    if (!url?.trim()) return;
+  // "From a URL" view: a new URL, or one of the last URLs imported (remembered on the server).
+  async openRemotes() {
     try {
-      await request("POST", "/config/import-url", { url: url.trim() });
-      toast("success", t("Profiles"), t("Profiles file imported."));
-      await this.load();
+      const { remotes } = await request("GET", "/config/remotes");
+      this.remotes = { list: remotes, error: "" };
     } catch (e) {
       toast("error", t("Profiles"), e.message);
     }
+    this.render();
+  }
+
+  // Compares the file at `url` with the profiles file, before choosing to merge or replace.
+  async compareUrl(url) {
+    if (!url?.trim()) return;
+    this.remotes = { ...this.remotes, busy: true, error: "" };
+    this.render();
+    try {
+      const preview = await request("POST", "/config/compare-url", { url: url.trim() });
+      // Merge takes by default everything that is new or different in the remote file.
+      const take = new Set([...preview.added, ...preview.changed].map((p) => p.name));
+      this.remotes = { ...this.remotes, busy: false, preview, take, opened: new Set() };
+    } catch (e) {
+      this.remotes = { ...this.remotes, busy: false, error: e.message };
+    }
+    this.render();
+  }
+
+  // mode "merge": only the ticked profiles of the remote file; "replace": the whole file.
+  async importUrl(mode) {
+    const { preview, take } = this.remotes;
+    if (mode === "replace" && !confirm(t("Replace the profiles file with {file}?", { file: preview.url }) +
+        (preview.removed.length ? `\n\n${t("Deleted: {names}", { names: preview.removed.join(", ") })}` : ""))) return;
+    this.remotes = { ...this.remotes, busy: true, error: "" };
+    this.render();
+    try {
+      const result = await request("POST", "/config/import-url",
+        { url: preview.url, sha256: preview.sha256, mode, profiles: [...take] });
+      this.remotes = null;
+      toast("success", t("Profiles"), mode === "merge"
+        ? t("Merged: {added} profile(s) added, {replaced} replaced.",
+          { added: result.added.length + result.inherited.length, replaced: result.replaced.length })
+        : t("Profiles file imported."));
+      await this.load();
+    } catch (e) {
+      this.remotes = { ...this.remotes, busy: false, error: e.message };
+      this.render();
+    }
+  }
+
+  async forgetRemote(url) {
+    try {
+      const { remotes } = await request("DELETE", "/config/remotes", { url });
+      this.remotes = { ...this.remotes, list: remotes };
+    } catch (e) {
+      this.remotes = { ...this.remotes, error: e.message };
+    }
+    this.render();
   }
 
   async exportFile() {
@@ -1198,7 +1256,8 @@ class ProfilesPanel {
     const focused = document.activeElement === this.search;
     const { selectionStart, selectionEnd } = this.search;
     this.root.replaceChildren(
-      this.editing ? this.renderEditor() : this.settings ? this.renderSettings()
+      this.editing ? this.renderEditor() : this.remotes ? this.renderRemotes()
+        : this.settings ? this.renderSettings()
         : this.uninstall ? this.renderUninstall() : this.renderMain());
     if (focused && this.search.isConnected) {
       this.search.focus();
@@ -1260,6 +1319,100 @@ class ProfilesPanel {
       el("div", { class: "bar" },
         el("button", { class: "primary", onclick: () => this.save(area.value) }, t("Save")),
         el("button", { onclick: () => { this.editing = null; this.render(); } }, t("Cancel"))),
+    );
+  }
+
+  renderRemotes() {
+    if (this.remotes.preview) return this.renderRemotePreview();
+    const { list, busy, error } = this.remotes;
+    const locked = !!this.data?.readonly || busy;
+    const input = el("input", { type: "url", class: "url", disabled: locked,
+                                placeholder: "https://raw.githubusercontent.com/…/profiles.json",
+                                onkeydown: (e) => e.key === "Enter" && this.compareUrl(input.value) });
+    return el("div", { style: "display:flex;flex-direction:column;gap:8px" },
+      el("h3", {}, t("Import from a URL")),
+      el("div", { class: "muted" },
+        t("Profiles file published at a URL (e.g. a raw GitHub or gist link): the differences with " +
+          "yours are shown first, then you choose to merge or replace.")),
+      el("div", { class: "bar", style: "flex-wrap:nowrap" }, input,
+        el("button", { class: "primary", disabled: locked, onclick: () => this.compareUrl(input.value) },
+          t("Compare"))),
+      el("h4", {}, t("Recent URLs")),
+      list.length
+        ? el("div", { class: "details" }, list.map((r) => el("div", { class: "item", style: "align-items:center" },
+          el("span", { class: "name", title: r.url }, r.url),
+          r.date && el("span", { class: "muted" }, new Date(r.date).toLocaleDateString(LANG)),
+          el("button", { disabled: locked, title: t("Compares this file with yours, then merge or replace"),
+                         onclick: () => this.compareUrl(r.url) }, t("Sync")),
+          el("button", { class: "icon", disabled: locked, title: t("Forget this URL"),
+                         onclick: () => this.forgetRemote(r.url) }, "✕"))))
+        : el("div", { class: "muted" }, t("None")),
+      busy && el("div", { class: "muted" }, t("Loading…")),
+      error && el("div", { class: "error" }, error),
+      el("div", { class: "bar" },
+        el("button", { disabled: busy, onclick: () => { this.remotes = null; this.render(); } }, t("Cancel"))),
+    );
+  }
+
+  // Differences between the remote file and the profiles file, profile by profile; the ticked
+  // ones are taken by "Merge".
+  renderRemotePreview() {
+    const { preview: p, take, opened, busy, error } = this.remotes;
+    const locked = !!this.data?.readonly || busy;
+    const counts = (diff) => {
+      const n = (key) => Object.values(diff.sections).reduce((sum, d) => sum + d[key].length, 0);
+      return [["added", "+", "diff-add"], ["removed", "−", "diff-del"], ["changed", "~", "diff-mod"]]
+        .filter(([key]) => n(key)).map(([key, sign, cls]) => el("span", { class: cls }, `${sign}${n(key)}`));
+    };
+    const lines = (diff) => [
+      diff.fields.length > 0 && el("div", { class: "muted" },
+        t("Fields changed: {names}", { names: diff.fields.join(", ") })),
+      Object.entries(diff.sections).map(([section, d]) => [
+        el("div", { class: "group" }, section),
+        d.added.map((label) => el("div", { class: "item diff-add" }, `+ ${label}`)),
+        d.removed.map((label) => el("div", { class: "item diff-del" }, `− ${label}`)),
+        d.changed.map((label) => el("div", { class: "item diff-mod" }, `~ ${label}`)),
+      ]),
+    ];
+    const row = (profile, extra) => el("div", { class: "diff-row" },
+      el("input", { type: "checkbox", checked: take.has(profile.name), disabled: locked,
+                    title: t("Taken by Merge"),
+                    onchange: (e) => { e.target.checked ? take.add(profile.name) : take.delete(profile.name); this.render(); } }),
+      el("details", { open: opened.has(profile.name),
+                      ontoggle: (e) => { e.target.open ? opened.add(profile.name) : opened.delete(profile.name); } },
+        el("summary", {}, el("span", { class: "name" }, profile.name), " ", counts(profile.diff),
+          extra && el("span", { class: "muted" }, ` · ${extra}`)),
+        el("div", { class: "details" }, lines(profile.diff))));
+    const differs = p.added.length + p.changed.length;
+    return el("div", { class: "cprof-diff", style: "display:flex;flex-direction:column;gap:8px" },
+      el("h3", {}, t("Import from a URL")),
+      el("div", { class: "muted", style: "word-break:break-all" }, p.url),
+      el("div", {}, t("{added} new, {changed} different, {removed} only in your file, {same} identical",
+        { added: p.added.length, changed: p.changed.length, removed: p.removed.length, same: p.same.length })),
+      p.added.length > 0 && el("h4", {}, t("New in the remote file")),
+      p.added.map((profile) => row(profile, profile.description)),
+      p.changed.length > 0 && el("h4", {}, t("Different in the remote file")),
+      p.changed.map((profile) => row(profile)),
+      p.removed.length > 0 && el("h4", {}, t("Only in your file")),
+      p.removed.length > 0 && el("div", { class: "muted" },
+        t("{names}: kept by Merge, deleted by Replace.", { names: p.removed.join(", ") })),
+      p.same.length > 0 && el("div", { class: "muted", title: p.same.join(", ") },
+        t("{n} identical profile(s).", { n: p.same.length })),
+      p.other_keys.length > 0 && el("div", { class: "muted" },
+        t("Other keys that differ ({names}): only taken by Replace.", { names: p.other_keys.join(", ") })),
+      !differs && el("div", { class: "ok" }, t("Your file already has all the profiles of the remote file.")),
+      differs > 0 && el("div", { class: "muted" },
+        t("Merge adds or replaces the ticked profiles (and adds the profiles they extend if missing); " +
+          "Replace puts the whole remote file in place of yours.")),
+      busy && el("div", { class: "muted" }, t("Loading…")),
+      error && el("div", { class: "error" }, error),
+      el("div", { class: "bar" },
+        el("button", { class: "primary", disabled: locked || !take.size, onclick: () => this.importUrl("merge") },
+          t("Merge ({n})", { n: take.size })),
+        el("button", { class: "danger", disabled: locked, onclick: () => this.importUrl("replace") },
+          t("Replace all")),
+        el("button", { disabled: busy, onclick: () => { this.remotes = { ...this.remotes, preview: null, error: "" }; this.render(); } },
+          t("Back"))),
     );
   }
 
@@ -1656,7 +1809,7 @@ class ProfilesPanel {
       el("button", { onclick: () => this.edit(), disabled: locked }, t("Edit")),
       el("button", { onclick: () => this.importFile(), disabled: locked,
                      title: t("Replaces the profiles file with a file from your computer") }, t("Import…")),
-      el("button", { onclick: () => this.importUrl(), disabled: locked,
+      el("button", { onclick: () => this.openRemotes(), disabled: locked,
                      title: t("Replaces the profiles file with the one at a URL") }, t("From a URL…")),
       el("button", { onclick: () => this.exportFile() }, t("Export")),
       (!data || data.source === "user") && el("button", {
