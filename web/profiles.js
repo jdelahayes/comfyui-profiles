@@ -154,7 +154,29 @@ const STYLE = `
 .cprof .pill.toggle input { display: none; }
 .cprof .pill.clear { border-color: transparent; padding-right: 8px; }
 .cprof .head { display: flex; gap: 8px; align-items: center; }
-.cprof .head label { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; cursor: pointer;
+/* Profile card: compact when folded (one-line description, small chips, frameless buttons). */
+.cprof .profile { padding: 5px 8px; }
+/* Name and chips flow like text around the actions floated on the right: beside them on the
+   first line, over the whole width below. */
+.cprof .profile .head { display: block; }
+.cprof .profile .head::after { content: ""; display: block; clear: both; }
+.cprof .profile .head .actions { float: right; margin: 0 0 2px 4px; }
+.cprof .profile .titles .chips { display: inline; margin: 0; }
+.cprof .profile .titles .chip { display: inline-flex; vertical-align: middle; margin: 2px 3px 1px 0; }
+.cprof .profile .head label.name { display: inline-flex; vertical-align: middle; margin: 3px 6px 1px 0;
+  font-size: 13px; line-height: 1.25; }
+.cprof .profile .actions { gap: 0; }
+.cprof .profile .actions button.icon { background: transparent; border-color: transparent; padding: 3px 5px;
+  height: 22px; }
+.cprof .profile .actions button.icon i { font-size: 13px; }
+.cprof .profile .actions button.icon:hover:not(:disabled) { filter: none; background: var(--comfy-input-bg); }
+.cprof .profile .chips { gap: 3px; margin: 3px 0 1px; }
+.cprof .profile .chip { font-size: 10.5px; padding: 0 6px; line-height: 17px; }
+.cprof .profile .chip.variant { gap: 4px; padding-left: 5px; }
+.cprof .profile .desc { font-size: 11.5px; }
+.cprof .profile:not(.open) :is(.desc, .match) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  word-break: normal; }
+.cprof .head label.name { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; cursor: pointer;
   font-weight: 600; overflow-wrap: anywhere; }
 /* Chips: pills tinted with their color. */
 .cprof .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 2px; }
@@ -1620,17 +1642,10 @@ class ProfilesPanel {
       const size = !p.variants && profileSize(p);
       const todo = !p.variants && todoSize(p);
       const startup = this.data.default.filter((r) => parseRef(r).name === name);
-      return el("div", { class: `profile ${p.state}${this.selected.has(name) ? " selected" : ""}`, title: label },
+      const open = this.expanded.has(name);
+      return el("div", { class: `profile ${p.state}${this.selected.has(name) ? " selected" : ""}${open ? " open" : ""}`, title: label },
         el("div", { class: "head" },
-          el("label", {},
-            el("input", {
-              type: "checkbox", checked: this.selected.has(name), disabled: running,
-              onchange: (e) => {
-                e.target.checked ? this.selected.add(name) : this.selected.delete(name);
-                this.render();
-              },
-            }),
-            name),
+          // Actions first: floated right, the name and chips flow beside them, then below.
           el("div", { class: "actions" },
             p.unmanaged > 0 && iconButton("pi-link",
               t("Take over the {n} item(s) of {name} already present…", { n: p.unmanaged, name }),
@@ -1644,26 +1659,38 @@ class ProfilesPanel {
               locked || !state.uninstall || nothing, () => this.prepareUninstall([ref])),
             iconButton(this.expanded.has(name) ? "pi-chevron-down" : "pi-chevron-right",
               this.expanded.has(name) ? t("Hide details") : t("Show what is installed"),
-              false, () => this.expand(name)))),
-        // Chips under the name: on the same line, they would squash it in the sidebar.
-        p.variants && this.renderVariants(name, p, running),
-        (startup.length || size || todo || p.unmanaged > 0) && el("div", { class: "chips" },
-          startup.length > 0 &&
-            el("span", { class: "chip default", title: t("In COMFY_PROFILES: synced at every startup") +
-                (p.variants ? ` (${startup.join(", ")})` : "") },
-              t("startup")),
-          size && el("span", { class: "chip", title: t("Total size of the profile's files, extends included") }, size),
-          todo && el("span", {
-            class: "chip download",
-            title: t("Missing files that installing the profile would add (custom nodes and pip packages not counted)"),
-          }, todo),
-          p.unmanaged > 0 && el("span", {
-            class: "chip unmanaged",
-            title: t("{n} item(s) present, including extends, but not installed by the manager " +
-                     "(Manager, copied by hand...): uninstalling leaves them in place.", { n: p.unmanaged }),
-          }, t("{n} not managed", { n: p.unmanaged }))),
-        p.description && el("div", { class: "muted" }, p.description),
-        p.extends.length > 0 && el("div", { class: "muted" }, `extends : ${p.extends.join(", ")}`),
+              false, () => this.expand(name))),
+          // Name, then the chips (variants, then the profile's badges) in the same flow: on the
+          // name's line while there is room, wrapping below it otherwise.
+          el("div", { class: "titles" },
+            el("label", { class: "name" },
+              el("input", {
+                type: "checkbox", checked: this.selected.has(name), disabled: running,
+                onchange: (e) => {
+                  e.target.checked ? this.selected.add(name) : this.selected.delete(name);
+                  this.render();
+                },
+              }),
+              name),
+            (p.variants || startup.length || size || todo || p.unmanaged > 0) && el("div", { class: "chips" },
+              p.variants && this.renderVariants(name, p, running),
+              startup.length > 0 &&
+                el("span", { class: "chip default", title: t("In COMFY_PROFILES: synced at every startup") +
+                    (p.variants ? ` (${startup.join(", ")})` : "") },
+                  t("startup")),
+              size && el("span", { class: "chip", title: t("Total size of the profile's files, extends included") }, size),
+              todo && el("span", {
+                class: "chip download",
+                title: t("Missing files that installing the profile would add (custom nodes and pip packages not counted)"),
+              }, todo),
+              p.unmanaged > 0 && el("span", {
+                class: "chip unmanaged",
+                title: t("{n} item(s) present, including extends, but not installed by the manager " +
+                         "(Manager, copied by hand...): uninstalling leaves them in place.", { n: p.unmanaged }),
+              }, t("{n} not managed", { n: p.unmanaged }))))),
+        // Folded card: description on one line (whole on hover), extends hidden.
+        p.description && el("div", { class: "muted desc", title: open ? null : p.description }, p.description),
+        open && p.extends.length > 0 && el("div", { class: "muted" }, `extends : ${p.extends.join(", ")}`),
         matches.get(name)?.length > 0 && el("div", { class: "muted match" },
           t("Contains: {items}", { items: matches.get(name).slice(0, 3).join(", ") +
             (matches.get(name).length > 3 ? ` (+${matches.get(name).length - 3})` : "") })),
@@ -1760,36 +1787,38 @@ class ProfilesPanel {
     );
   }
 
-  // Variants of a profile: a chip each (state, size), ticked for the card's actions.
+  // Variants of a profile: a chip each (state, size), ticked for the card's actions; placed in
+  // the card's row of chips.
   renderVariants(name, p, running) {
     const chosen = this.chosen(name);
-    return el("div", { class: "chips" },
-      p.variants.map((v) => {
-        const isDefault = v.name === p.default_variant;
-        const state = t((STATES[v.state] || STATES.missing).label);
-        const todo = todoSize(v);
-        const picked = chosen.has(v.name);
-        // Ticked but not (fully) installed: what the card's sync will install.
-        const pending = picked && !SATISFIED.has(v.state);
-        return el("label", {
-          class: `chip variant ${v.state}${picked ? " chosen" : ""}${pending ? " pending" : ""}`,
-          title: [`${name}[${v.name}] : ${state.toLowerCase()}`, isDefault && t("Default variant"),
-                  todo, pending ? t("Ticked: installed by the card's sync")
-                    : picked ? t("Ticked: already installed")
-                    : t("Tick to act on this variant only (none ticked: the whole profile)")].filter(Boolean).join("\n"),
-        },
-          el("input", {
-            type: "checkbox", checked: chosen.has(v.name), disabled: running,
-            onchange: (e) => {
-              const next = new Set(chosen);
-              e.target.checked ? next.add(v.name) : next.delete(v.name);
-              this.variants.set(name, next);
-              this.render();
-            },
-          }),
-          `${v.name}${isDefault ? " ★" : ""} · ${profileSize(v) || "?"}`,
-          pending && el("i", { class: "pick pi pi-download" }));
-      }));
+    return p.variants.map((v) => {
+      const isDefault = v.name === p.default_variant;
+      const state = t((STATES[v.state] || STATES.missing).label);
+      const todo = todoSize(v);
+      const picked = chosen.has(v.name);
+      // Ticked but not (fully) installed: what the card's sync will install.
+      const pending = picked && !SATISFIED.has(v.state);
+      // The size is only given on hover, to keep the chip short.
+      return el("label", {
+        class: `chip variant ${v.state}${picked ? " chosen" : ""}${pending ? " pending" : ""}`,
+        title: [`${name}[${v.name}] : ${state.toLowerCase()}`, isDefault && t("Default variant"),
+                t("Size: {size}", { size: profileSize(v) || "?" }),
+                todo, pending ? t("Ticked: installed by the card's sync")
+                  : picked ? t("Ticked: already installed")
+                  : t("Tick to act on this variant only (none ticked: the whole profile)")].filter(Boolean).join("\n"),
+      },
+        el("input", {
+          type: "checkbox", checked: chosen.has(v.name), disabled: running,
+          onchange: (e) => {
+            const next = new Set(chosen);
+            e.target.checked ? next.add(v.name) : next.delete(v.name);
+            this.variants.set(name, next);
+            this.render();
+          },
+        }),
+        `${v.name}${isDefault ? "★" : ""}`,
+        pending && el("i", { class: "pick pi pi-download" }));
+    });
   }
 
   // Profiles declared by the open workflow ("Workflow profiles" node): state, install, and

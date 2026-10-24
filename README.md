@@ -336,8 +336,9 @@ missing message stays in English.
 ## Panel
 
 - Profile list: description, size, `extends`, *startup* badge for those of `COMFY_PROFILES`.
-  A profile with variants keeps a single card, with one chip per variant (state color, size,
-  ★ for the default variant): the ticked variants are those the card's buttons, and the
+  A folded card is compact: description on one line, `extends` only once unfolded.
+  A profile with variants keeps a single card, with one chip per variant next to its name
+  (state color, ★ for the default variant; its size on hover): the ticked variants are those the card's buttons, and the
   buttons under the list for a checked profile, apply to (`krea2-raw[int8,bf16]`). None is
   ticked at first: these buttons then apply to the whole profile, all its variants included
   (installing, or uninstalling with its common items). A ticked variant is

@@ -397,5 +397,6 @@
   "Tick to act on this variant only (none ticked: the whole profile)": "Coche pour n'agir que sur cette variante (aucune cochée : tout le profil)",
   "with --json: what uninstalling each profile alone would remove, in short": "avec --json : ce que désinstaller chaque profil seul supprimerait, en résumé",
   "Nothing to remove: its files are still used by {names}.": "Rien à supprimer : ses fichiers sont encore utilisés par {names}.",
-  "Nothing to remove: its files were not installed by the manager (take them over to remove them).": "Rien à supprimer : ses fichiers n'ont pas été installés par le gestionnaire (prends-les en charge pour pouvoir les supprimer)."
+  "Nothing to remove: its files were not installed by the manager (take them over to remove them).": "Rien à supprimer : ses fichiers n'ont pas été installés par le gestionnaire (prends-les en charge pour pouvoir les supprimer).",
+  "Size: {size}": "Taille : {size}"
 }

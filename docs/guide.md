@@ -251,7 +251,7 @@ command line, `COMFY_PROFILES`, `extends`, Workflow profiles node):
 | `krea2-turbo[]` | only the common items |
 
 In the panel, a profile with variants keeps **one card**, with one chip per variant (its
-state color and its size, ★ for the default variant). Click the chips the card's buttons apply
+state color, ★ for the default variant; its size on hover). Click the chips the card's buttons apply
 to. With none ticked (the starting point), they apply to the **whole profile**: all its
 variants are installed, or uninstalled along with its common items. With one or several
 ticked, they only apply to those variants. Same for the Sync, Dry-run, Update and Uninstall
