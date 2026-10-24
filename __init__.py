@@ -44,6 +44,7 @@ WEB_DIRECTORY = "./web"
 SCRIPT = Path(os.environ.get("COMFY_PROFILES_SCRIPT") or Path(__file__).parent / "comfy_profiles.py")
 API = "/comfy-profiles"
 EVENT = "comfy-profiles.log"
+EVENT_MARK = "\x1fcomfy-profiles "  # line of an event of the script (comfy_profiles.event)
 # A profile, optionally with variants: krea2-turbo, krea2-raw[int8,bf16], krea2-raw[] (common
 # items only), see comfy_profiles.py.
 PROFILE_NAME = re.compile(r"[\w.-]+(\[([\w.-]+(,[\w.-]+)*)?\])?")
@@ -85,6 +86,10 @@ def cli_env(lang=None):
         "COMFY_MODELS_DIR": folder_paths.models_dir,
         "COMFY_CUSTOM_NODES_DIR": folder_paths.get_folder_paths("custom_nodes")[0],
         "COMFY_USER_DIR": folder_paths.get_user_directory(),
+        # Images and other files of ComfyUI, never models (see comfy_profiles.model_bases).
+        "COMFY_DATA_DIRS": json.dumps([folder_paths.get_input_directory(),
+                                       folder_paths.get_output_directory(),
+                                       folder_paths.get_temp_directory()]),
         # Folders of each model type, extra_model_paths.yaml included, in ComfyUI's order: a
         # model is found wherever ComfyUI sees it.
         "COMFY_MODEL_FOLDERS": json.dumps({
@@ -157,9 +162,24 @@ async def lang_catalog(request):
     return web.json_response({"lang": code, "messages": messages})
 
 
+def token_sources():
+    """Where the download tokens come from, never their value: "env" (variable of ComfyUI's
+    environment), "login" (Hugging Face token saved by `hf auth login`, which huggingface_hub
+    also reads) or None."""
+    hf_file = Path(os.environ.get("HF_TOKEN_PATH")
+                   or Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface") / "token")
+    return {
+        "hf": "env" if os.environ.get("HF_TOKEN")
+        else "login" if hf_file.is_file() and hf_file.read_text().strip() else None,
+        "civitai": "env" if os.environ.get("CIVITAI_TOKEN") else None,
+        "platform": sys.platform,
+    }
+
+
 @routes.get(f"{API}/profiles")
 async def list_profiles(request):
-    return web.json_response({**await cli_json("list", request=request), "readonly": READONLY})
+    return web.json_response({**await cli_json("list", request=request), "readonly": READONLY,
+                              "tokens": token_sources()})
 
 
 @routes.get(f"{API}/status")
@@ -173,6 +193,12 @@ async def uninstall_plan(request):
     names = profile_names(request.query.get("profiles"), request)
     extends = ["--with-extends"] if request.query.get("with_extends") in ("1", "true") else []
     return web.json_response(await cli_json("uninstall", ",".join(names), *extends, request=request))
+
+
+@routes.get(f"{API}/orphans")
+async def orphans(request):
+    """What is on disk without being part of any profile (models, custom nodes, workflows)."""
+    return web.json_response(await cli_json("orphans", request=request))
 
 
 @routes.get(f"{API}/uninstall-check")
@@ -210,6 +236,9 @@ class Job:
         self.force = False
         self.returncode = None
         self.lines = {}  # index -> text; a progress bar rewrites its index
+        # Downloads and checks of files of the running sync, from the script's events:
+        # step number -> {step, name, label, kind, state, done, total, error}.
+        self.downloads = {}
         self.next_index = 0
 
     @property
@@ -226,6 +255,7 @@ class Job:
             "force": self.force,
             "returncode": self.returncode,
             "lines": sorted(self.lines.items()),
+            "downloads": list(self.downloads.values()),
         }
 
     def emit(self, index, text):
@@ -236,7 +266,7 @@ class Job:
 
     async def start(self, action, profiles, dry_run, with_extends=False, lang=None, force=False):
         self.action, self.profiles, self.dry_run, self.force = action, profiles, dry_run, force
-        self.returncode, self.lines, self.stopping = None, {}, False
+        self.returncode, self.lines, self.downloads, self.stopping = None, {}, {}, False
         if action == "sizes":  # all profiles, writes the sizes into the profiles file
             # force: also queries again the files whose size is already known.
             cmd = [SCRIPT, "sizes"] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
@@ -249,7 +279,7 @@ class Job:
         self.proc = await asyncio.create_subprocess_exec(
             sys.executable, *map(str, cmd),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            env=cli_env(lang),
+            env={**cli_env(lang), "COMFY_PROFILES_EVENTS": "1"},
             # Separate process group: as a last resort, git, pip... are killed too.
             start_new_session=True)
         asyncio.create_task(self.pump())
@@ -272,6 +302,25 @@ class Job:
             except ProcessLookupError:
                 pass
 
+    def on_event(self, data):
+        """Event of the script (see comfy_profiles.event): state of the downloads, sent to the
+        panel as the changed entries."""
+        changed = []
+        if "downloads" in data:
+            for entry in data["downloads"]:
+                self.downloads[entry["step"]] = {**entry, "state": "waiting", "done": 0,
+                                                 "total": None, "error": None}
+            changed = list(self.downloads.values())
+        for step, (done, total) in (data.get("progress") or {}).items():
+            if entry := self.downloads.get(int(step)):
+                entry.update(done=done, total=total or entry["total"])
+                changed.append(entry)
+        if entry := self.downloads.get(data.get("step")):
+            entry.update(state=data["state"], error=data.get("error"))
+            changed.append(entry)
+        if changed:
+            PromptServer.instance.send_sync(EVENT, {"downloads": changed})
+
     async def pump(self):
         # Splits on \n and \r: progress lines (downloads, pip) rewrite themselves with \r, so
         # the current line is replaced instead of adding a new one.
@@ -285,7 +334,12 @@ class Job:
                 if not match:
                     break
                 text, sep, buffer = buffer[:match.start()], match.group(), buffer[match.end():]
-                if sep == "\r":
+                if text.startswith(EVENT_MARK):
+                    try:
+                        self.on_event(json.loads(text[len(EVENT_MARK):]))
+                    except (ValueError, KeyError, TypeError) as e:
+                        log.warning("[comfy-profiles] %s: %s", text, e)
+                elif sep == "\r":
                     if text:
                         self.emit(self.next_index, text)
                 else:

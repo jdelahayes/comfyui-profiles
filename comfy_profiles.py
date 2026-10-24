@@ -12,6 +12,7 @@ Usage:
   comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json [--each]]
   comfy_profiles.py [--config FILE] adopt PROFILE[,PROFILE...] [--dry-run] [--json]
   comfy_profiles.py [--config FILE] sizes [--env FILE] [--force] [--dry-run]
+  comfy_profiles.py [--config FILE] orphans [--json]
   comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials] [--json]
 
 Profiles file, the first one found:
@@ -548,6 +549,19 @@ _output_lock = threading.RLock()
 CANCEL = threading.Event()
 # File being downloaded in this thread (name shown by the Hugging Face progress).
 _current = threading.local()
+# Panel (COMFY_PROFILES_EVENTS=1): the state of each download is also written as a line
+# EVENT_MARK + JSON, which the server takes out of the logs (see event()).
+EVENTS = os.environ.get("COMFY_PROFILES_EVENTS") == "1"
+EVENT_MARK = "\x1fcomfy-profiles "
+
+
+def event(**data):
+    """Event for the panel, nothing without COMFY_PROFILES_EVENTS. Starts with \r: the progress
+    line being written ends there, and is not repeated as a log line."""
+    if EVENTS:
+        with _output_lock:
+            sys.stdout.write("\r" + EVENT_MARK + json.dumps(data, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
 
 
 class Progress:
@@ -562,7 +576,7 @@ class Progress:
     NAMES_WIDTH = 80
 
     def __init__(self):
-        self.tasks = {}  # id -> [name, bytes written, total or None]
+        self.tasks = {}  # id -> [name, bytes written, total or None, step number or None]
         self.next_id = 0
         self.shown = 0  # length of the line shown, 0 if none
         self.last = 0.0
@@ -572,7 +586,7 @@ class Progress:
     def start(self, name, total=None, done=0):
         with _output_lock:
             self.next_id += 1
-            self.tasks[self.next_id] = [name, done, total]
+            self.tasks[self.next_id] = [name, done, total, getattr(_current, "step", None)]
             return self.next_id
 
     def update(self, task, done, total=None):
@@ -610,6 +624,7 @@ class Progress:
         since, before = self.samples[0]
         rate = (self.received - before) / (now - since) if now > since else 0
         tasks = list(self.tasks.values())
+        event(progress={task[3]: [task[1], task[2]] for task in tasks if task[3]})
         done = sum(task[1] for task in tasks)
         totals = [task[2] for task in tasks]
         parts = [tasks[0][0] if len(tasks) == 1 else t("{n} files", n=len(tasks))]
@@ -975,8 +990,9 @@ class Step:
     """`record`: (path, kind) to add to the manifest once the step succeeded. `parallel`:
     download or check of a file, `name`, run several at a time (see run_steps)."""
 
-    def __init__(self, label, run, record=None, name=None, parallel=False):
+    def __init__(self, label, run, record=None, name=None, parallel=False, kind=None):
         self.label = label
+        self.kind = kind  # parallel step: "download" or "check"
         self.run = run
         self.record = record
         self.name = name or label
@@ -1059,10 +1075,11 @@ def plan_file(item, dest, kind, paths, versions, update=False, managed=False):
             remember_version(item, dest, versions)
 
         return Step(f"{describe_source(item)} -> {dest}", install, record=(dest, kind),
-                    name=dest.name, parallel=True)
+                    name=dest.name, parallel=True, kind="download")
     if update and managed and "civitai" not in item:
         return Step(t("{source}: checking {path}", source=describe_source(item), path=dest),
-                    lambda: refresh_file(item, dest, paths, versions), name=dest.name, parallel=True)
+                    lambda: refresh_file(item, dest, paths, versions), name=dest.name, parallel=True,
+                    kind="check")
     return None
 
 
@@ -1849,6 +1866,9 @@ def run_steps(steps, manifest, jobs, finished):
 
     def done(i, step, error):
         finished.append(step)
+        if step.parallel:
+            event(step=i, state="failed" if error is not None else "done",
+                  error=str(error) if error is not None else None)
         if error is not None:
             out(f"!! ({i}/{total}) " + t("Failed: {error}", error=error), err=True)
             failures.append(step.label)
@@ -1867,9 +1887,16 @@ def run_steps(steps, manifest, jobs, finished):
 
     def run(i, step):
         out(f">> ({i}/{total}) {step.label}")
-        step.run()
+        event(step=i, state="running")
+        _current.step = i
+        try:
+            step.run()
+        finally:
+            _current.step = None
 
     downloads = [n for n in numbered if n[1].parallel]
+    event(downloads=[{"step": i, "name": step.name, "label": step.label, "kind": step.kind}
+                     for i, step in downloads])
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="download")
     futures = {pool.submit(run, i, step): (i, step) for i, step in downloads}
     try:
@@ -1916,7 +1943,11 @@ def cmd_sync(profiles, args):
         print(">> " + t("{path} created: {n} item(s) already present taken over.",
                         path=manifest.file, n=len(manifest.items)))
     print(">> " + (t("HF_TOKEN found.") if os.environ.get("HF_TOKEN")
+                   else t("Hugging Face token of `hf auth login` found.") if hf_token()
                    else t("No HF_TOKEN: anonymous HF downloads.")))
+    if any("civitai" in str(step.label) for step in steps):
+        print(">> " + (t("CIVITAI_TOKEN found.") if os.environ.get("CIVITAI_TOKEN")
+                       else t("No CIVITAI_TOKEN: CivitAI downloads may be refused.")))
     settings = download_settings(paths)
     apply_download_settings(settings)
     jobs = args.jobs or settings["jobs"]
@@ -2171,6 +2202,182 @@ def uninstall_summary(profiles, name, paths, manifest, with_extends):
     return {"remove": len(plan["remove"]), "freed": sum(r["size"] for r in plan["remove"]),
             "keep_profiles": plan["keep_profiles"], "unmanaged": len(plan["unmanaged"]),
             "startup": plan["startup"]}
+
+
+# --- Orphans --------------------------------------------------------------------------------
+
+# Never reported: ComfyUI's placeholders, partial downloads (see `settings`), caches.
+ORPHAN_SKIP = re.compile(r"^(\.|__pycache__$|put_.*_here$)|\.part$|\.part-info$")
+# Folders of ComfyUI that are not models (configs: the .yaml files shipped with it).
+ORPHAN_SKIP_TYPES = {"custom_nodes", "configs"}
+
+
+# Model files; any other file named after a file next to it is an annex of that file (preview,
+# .civitai.info, .rgthree-info.json...), never reported on its own.
+MODEL_EXTENSIONS = {".safetensors", ".sft", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".onnx",
+                    ".patch", ".pkl", ".engine"}
+
+
+def annex(entry, names):
+    if entry.suffix.lower() in MODEL_EXTENSIONS or not entry.is_file():
+        return False
+    return any(other != entry.name and (entry.name.startswith(other + ".")
+                                        or entry.name.startswith(Path(other).stem + "."))
+               for other in names if Path(other).suffix.lower() in MODEL_EXTENSIONS)
+
+
+def tree_stats(path):
+    """(size, number of files) of a file, or of a folder and its content (symbolic links not
+    followed)."""
+    if not path.is_dir() or path.is_symlink():
+        return path.lstat().st_size, 1
+    total = count = 0
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(root, name)).st_size
+                count += 1
+    return total, count
+
+
+# Files listed in a model folder reported whole, at most (the biggest first).
+ORPHAN_MAX_CHILDREN = 500
+
+
+def folder_files(path):
+    """Files of a folder, recursively, without the annexes (see annex): [{name (relative path),
+    size, mtime}], the biggest first."""
+    found = []
+    for root, dirs, files in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if not ORPHAN_SKIP.search(d))
+        for name in sorted(files):
+            if ORPHAN_SKIP.search(name) or annex(Path(root, name), files):
+                continue
+            with contextlib.suppress(OSError):
+                stat = os.lstat(os.path.join(root, name))
+                found.append({"name": os.path.relpath(os.path.join(root, name), path),
+                              "size": stat.st_size, "mtime": int(stat.st_mtime)})
+    found.sort(key=lambda f: -f["size"])
+    return found[:ORPHAN_MAX_CHILDREN]
+
+
+def orphan_entry(kind, name, path, manifest):
+    size, files = tree_stats(path)
+    folder = path.is_dir() and not path.is_symlink()
+    entry = {"kind": kind, "name": name, "path": str(path), "size": size, "files": files,
+             "mtime": int(path.lstat().st_mtime), "folder": folder, "managed": path in manifest}
+    if kind == "model" and folder:
+        entry["children"] = folder_files(path)
+    return entry
+
+
+def data_dirs(paths):
+    """ComfyUI's input, output and temp folders, and its user folder: images and other files,
+    never models."""
+    dirs = json.loads(os.environ.get("COMFY_DATA_DIRS") or "[]") or [
+        paths.comfy_home / name for name in ("input", "output", "temp")]
+    return {Path(os.path.realpath(d)) for d in [*dirs, paths.user]}
+
+
+def model_bases(paths):
+    """{folder: type} of the model folders to scan: those ComfyUI scans (extra_model_paths.yaml
+    included), plus the other subfolders of models/ and of a base holding several of them (used
+    directly by custom nodes, e.g. models/LLM). Never ComfyUI's input, output, temp or user
+    folders, nor anything inside them (see data_dirs)."""
+    excluded = data_dirs(paths)
+    folders = {}
+    for type_, dirs in paths.model_folders.items():
+        for d in dirs:
+            folders.setdefault(Path(d), type_)
+    parents = collections.Counter(d.parent for d in folders)
+    # ComfyUI's own folder is not a base: its other subfolders are not models.
+    bases = {p for p, n in parents.items() if n > 1 and p.resolve() != paths.comfy_home.resolve()}
+    for base in {paths.models, *bases}:
+        if base.is_dir():
+            for d in sorted(base.iterdir()):
+                if d.is_dir() and d not in folders and not ORPHAN_SKIP.search(d.name):
+                    folders[d] = d.name
+    seen, result = set(), {}
+    for folder, type_ in folders.items():
+        real = folder.resolve()
+        if (type_ in ORPHAN_SKIP_TYPES or real in seen or not folder.is_dir() or folder == paths.staging
+                or any(real == d or d in real.parents for d in excluded)):
+            continue
+        seen.add(real)
+        result[folder] = type_
+    return result
+
+
+def cmd_orphans(profiles, args):
+    """What is on disk without being part of any profile: models (a folder without any file of
+    a profile counts as one item), custom nodes, workflows. Read-only."""
+    paths = Paths()
+    manifest = Manifest(paths, profiles)
+    known_files, node_names, node_urls = set(), set(), set()
+    for name in profiles:
+        try:
+            merged = resolve(profiles, [all_variants(profiles, name)])
+        except (ConfigError, SystemExit):
+            continue
+        for profile, item in merged["custom_nodes"]:
+            with contextlib.suppress(ConfigError):
+                node_names.add(custom_node_name(item, f"[{profile}] custom_nodes").lower())
+            if item.get("git"):
+                node_urls.add(normalize_repo_url(item["git"]))
+        for section in ("models", "workflows"):
+            for profile, item in merged[section]:
+                with contextlib.suppress(ConfigError, KeyError):
+                    dest = file_dest(item, f"[{profile}] {section}", section, paths)
+                    known_files.add(Path(os.path.realpath(dest)))
+    # Folders holding a file of a profile: looked into; the others are reported whole.
+    known_dirs = {parent for f in known_files for parent in f.parents}
+    items = []
+
+    def scan(folder, label):
+        entries = sorted(folder.iterdir(), key=lambda e: e.name.lower())
+        names = [e.name for e in entries]
+        for entry in entries:
+            if ORPHAN_SKIP.search(entry.name) or annex(entry, names):
+                continue
+            real = Path(os.path.realpath(entry))
+            if real in known_files:
+                continue
+            if entry.is_dir() and real in known_dirs:
+                scan(entry, f"{label}/{entry.name}")
+            else:
+                entry_json = orphan_entry("model", f"{label}/{entry.name}", entry, manifest)
+                if entry_json["files"]:  # an empty folder (left by an uninstall) is not shown
+                    items.append(entry_json)
+
+    for folder, type_ in model_bases(paths).items():
+        with contextlib.suppress(OSError):
+            scan(folder, type_)
+
+    seen = set()
+    for base in dict.fromkeys([paths.custom_nodes, paths.custom_nodes_store]):
+        if not base.is_dir():
+            continue
+        for entry in sorted(base.iterdir(), key=lambda e: e.name.lower()):
+            real = Path(os.path.realpath(entry))
+            if (not entry.is_dir() or ORPHAN_SKIP.search(entry.name) or real in seen
+                    or real == HERE or (real / "comfy_profiles.py").is_file()):
+                continue
+            seen.add(real)
+            url = node_repo_url(real)
+            if entry.name.lower() in node_names or (url and normalize_repo_url(url) in node_urls):
+                continue
+            items.append(orphan_entry("custom_node", entry.name, entry, manifest)
+                         | {"disabled": entry.name.endswith(".disabled"), "repo": url})
+
+    if paths.workflows.is_dir():
+        for path in sorted(paths.workflows.rglob("*.json")):
+            rel = path.relative_to(paths.workflows)
+            if any(ORPHAN_SKIP.search(part) for part in rel.parts):
+                continue
+            if Path(os.path.realpath(path)) not in known_files:
+                items.append(orphan_entry("workflow", str(rel), path, manifest))
+    print_json({"items": items})
+    return 0
 
 
 def cmd_uninstall(profiles, args):
@@ -2570,6 +2777,9 @@ def main():
     uninstall.add_argument("--json", action="store_true", help=t("JSON output (implies --dry-run)"))
     uninstall.add_argument("--each", action="store_true",
                            help=t("with --json: what uninstalling each profile alone would remove, in short"))
+    orphans = sub.add_parser("orphans", help=t("list what is on disk without being part of any profile "
+                                               "(models, custom nodes, workflows)"))
+    orphans.add_argument("--json", action="store_true", help=t("JSON output (always)"))
     settings = sub.add_parser("settings", help=t("download settings and partial downloads (JSON)"))
     settings.add_argument("--set", metavar="JSON",
                           help=t("settings to save, e.g. '{\"jobs\": 4}' (null: back to the default)"))
@@ -2600,7 +2810,7 @@ def main():
     if args.command == "sizes":
         sys.exit(cmd_sizes(path, source, args))
     commands = {"list": cmd_list, "show": cmd_show, "sync": cmd_sync, "uninstall": cmd_uninstall,
-                "adopt": cmd_adopt}
+                "adopt": cmd_adopt, "orphans": cmd_orphans}
     sys.exit(commands[args.command](profiles, args) or 0)
 
 

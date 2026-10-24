@@ -363,8 +363,8 @@ missing message stays in English.
   the size of each file (`?` as long as it is unknown: "Recalculate sizes" queries it at the
   source) and an icon that opens its source (Hugging Face, GitHub, CivitAI, Google Drive, PyPI
   or the URL).
-- Sync, dry-run, update (see [Update](#update)) or uninstall of the checked profiles, with live
-  logs. One action at a time; **Stop** interrupts it (the current clone is abandoned without
+- Sync, dry-run, update (see [Update](#update)) or uninstall of the checked profiles, with a
+  **Downloads** table (one progress bar per file) and live logs, hidden until **Show the log**. One action at a time; **Stop** interrupts it (the current clone is abandoned without
   leaving an incomplete folder; downloads keep their `.part`, see [Downloads](#downloads)).
 - **This workflow** section: profiles declared by the open workflow, or the offer to add the
   node, and the dialog checking the workflow's models: see [Workflow profiles](#workflow-profiles).
@@ -372,6 +372,15 @@ missing message stays in English.
 - **Recalculate sizes**: runs `comfy_profiles.py sizes` on the profiles file (only the files without
   a size are queried); **Recalculate all** also queries again those whose size is known
   (`--force`).
+- **On disk, outside the profiles** (tray icon next to the title): table of the models, custom
+  nodes and workflows present on disk that no profile of the file declares, all variants
+  included (`comfy_profiles.py orphans`), models grouped by root folder (folded, with their
+  total; the filter unfolds them): size, date, path to copy, *installed by the manager*
+  for what a profile since removed left behind; empty folders are not shown. A model folder without any file
+  of a profile counts as one item; previews and `.civitai.info`-like annexes are ignored.
+  Read-only.
+- **HF** / **CivitAI** badges under the title: whether each token is found; a click explains
+  how to set it (see [Secrets](#secrets)).
 - **Settings** (gear next to the title): download settings (see [Downloads](#downloads)) and
   deletion of partial downloads.
 - Restart of ComfyUI, needed after installing new custom nodes: same process started again, or
@@ -383,8 +392,10 @@ a shared instance, `COMFY_PROFILES_READONLY=1` limits the panel to browsing and 
 ## Downloads
 
 - **In parallel**: models and workflows are downloaded several at a time (3 by default), once
-  custom nodes and pip packages are installed, one by one. The logs show a single progress
-  line for all the running files (percentage, size, throughput).
+  custom nodes and pip packages are installed, one by one. The panel shows a
+  **Downloads** table, one row and progress bar per file (state, percentage, throughput); the
+  log, hidden by default (**Show the log**), keeps a single progress line for all the running
+  files.
 - **Resume**: an interrupted CivitAI, GitHub, URL or Google Drive download (Stop, network
   drop, container stopped) leaves a `<name>.part` file (ignored by ComfyUI), resumed where it
   stopped by the next sync, if the server accepts partial requests and the file has not
@@ -417,6 +428,7 @@ comfy_profiles.py [--config FILE] sync [PROFILE[,PROFILE...]] [--update] [--jobs
 comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json [--each]]
 comfy_profiles.py [--config FILE] adopt PROFILE[,PROFILE...] [--dry-run] [--json]
 comfy_profiles.py [--config FILE] sizes [--env FILE] [--force] [--dry-run]
+comfy_profiles.py [--config FILE] orphans --json           # on disk, outside any profile (JSON)
 comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials]   # settings (JSON)
 ```
 
@@ -460,7 +472,8 @@ Tokens and passwords: see [Secrets](#secrets).
 
 The panel neither asks for nor stores any secret: `HF_TOKEN` (or `hf auth login`),
 `CIVITAI_TOKEN` and `GDRIVE_ZIP_PASSWORD` are read from the environment of the ComfyUI server,
-so they must be set before ComfyUI starts. Examples of `.env` files and launchers for Linux,
+so they must be set before ComfyUI starts. The **HF** / **CivitAI** badges under the panel's
+title show whether each token is found, and a click explains how to set it. Examples of `.env` files and launchers for Linux,
 Windows (portable, PowerShell, Desktop) and Docker: [user guide, section 8](docs/guide.md#8-secrets-tokens-and-passwords).
 
 ## Integration in a Docker image

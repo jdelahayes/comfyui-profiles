@@ -74,14 +74,22 @@ file. To install one of them:
 
 1. Open the **Profiles** tab.
 2. Tick the profile, for instance `taesd-previews`.
-3. Click **Dry-run**: the log shows what would be downloaded, and where, without doing it.
-4. Click **Sync**: the files are downloaded, with live progress in the log.
+3. Click **Dry-run**, then **Show the log**: it lists what would be downloaded, and where,
+   without doing it. The log stays hidden until you show it (the choice is remembered).
+4. Click **Sync**: the **Downloads** table shows each file with its progress bar (percentage,
+   throughput, size on hover), waiting, done or failed, and a summary above it.
 5. The card turns green: the profile is installed.
 
 ![Dry-run of two profiles](images/panel-dryrun.png)
 
 New **models** are visible in ComfyUI right away (refresh the node lists with `R` if needed).
 New **custom nodes** only load after a restart: click **Restart ComfyUI**.
+
+To find what takes room without belonging to any profile, click the tray icon next to the
+title: **On disk, outside the profiles** lists the models, custom nodes and workflows that no
+profile of the file declares, with their size and path (read-only: nothing is deleted from
+there). Sort by size to spot the big leftovers, and *installed by the manager* for what a
+profile removed from the file left behind.
 
 Color code of the cards:
 
@@ -410,6 +418,11 @@ Some sources need credentials:
 
 Create the tokens at <https://huggingface.co/settings/tokens> (read access is enough) and in
 your CivitAI account settings (*API Keys*).
+
+The **HF** and **CivitAI** badges under the panel's title show whether ComfyUI sees each token
+(green: found, as a variable or, for Hugging Face, saved by `hf auth login`; gray: anonymous
+downloads). A click opens the procedure to set it, for Linux, Windows, macOS and Docker /
+RunPod, with commands to copy. The panel only knows whether a token is there, never its value.
 
 **The panel neither asks for nor stores any secret.** It runs the download script with the
 environment of the ComfyUI server. So the variables must be set **before ComfyUI starts**: a

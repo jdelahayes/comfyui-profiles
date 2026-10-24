@@ -233,6 +233,36 @@ const STYLE = `
 .cprof .log { background: var(--comfy-input-bg); border: 1px solid var(--border-color);
   border-radius: 6px; padding: 6px; font-family: monospace; font-size: 11px; white-space: pre-wrap;
   word-break: break-all; max-height: 320px; min-height: 80px; overflow-y: auto; }
+.cprof .logbar { display: flex; gap: 8px; align-items: center; }
+.cprof .logbar .status { flex: 1; min-width: 0; }
+.cprof .logbar button { display: inline-flex; gap: 6px; align-items: center; padding: 3px 9px;
+  font-size: 12px; white-space: nowrap; }
+.cprof .logbar button i { font-size: 11px; }
+/* Downloads of the sync: a row per file, with its bar. */
+.cprof .downloads { border: 1px solid var(--border-color); border-radius: var(--cp-radius);
+  background: var(--cp-surface); display: flex; flex-direction: column; font-size: 12px; }
+.cprof .downloads .dl-head { display: flex; gap: 8px; align-items: center; padding: 5px 8px;
+  border-bottom: 1px solid var(--border-color); font-weight: 600; }
+.cprof .downloads .dl-head .muted { margin-left: auto; font-weight: normal; }
+.cprof .downloads .dl-rows { max-height: 260px; overflow-y: auto; }
+.cprof .dl-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 2px 6px;
+  align-items: center; padding: 4px 8px; }
+.cprof .dl-row + .dl-row { border-top: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent); }
+.cprof .dl-row > i { font-size: 11px; color: var(--descrip-text, #999); }
+.cprof .dl-row .dl-name { font-family: monospace; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.cprof .dl-row .dl-info { color: var(--descrip-text, #999); white-space: nowrap; font-size: 11px; }
+.cprof .dl-row .dl-bar { grid-column: 2 / 4; height: 4px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--border-color) 70%, transparent); }
+.cprof .dl-row .dl-bar > div { height: 100%; width: 0; background: var(--cp-info); transition: width .4s; }
+.cprof .dl-row.running > i { color: var(--cp-info); }
+.cprof .dl-row.done > i { color: var(--cp-ok); }
+.cprof .dl-row.done .dl-bar > div { background: var(--cp-ok); }
+.cprof .dl-row.failed > i, .cprof .dl-row.failed .dl-info { color: var(--cp-err); }
+.cprof .dl-row.failed .dl-bar > div { background: var(--cp-err); }
+.cprof .dl-row.waiting .dl-name { opacity: .6; }
+.cprof .dl-row .dl-bar.busy > div { width: 30%; animation: cprof-busy 1.2s ease-in-out infinite; }
+@keyframes cprof-busy { from { margin-left: -30%; } to { margin-left: 100%; } }
 .cprof .workflow { border: 1px solid var(--border-color); border-left: 3px solid var(--cp-info);
   border-radius: var(--cp-radius); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
   background: color-mix(in srgb, var(--cp-info) 7%, var(--cp-surface)); }
@@ -248,6 +278,62 @@ const STYLE = `
 .cprof .need { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .cprof .need .name { flex: 1; min-width: 0; font-family: monospace; word-break: break-all; cursor: pointer; }
 .cprof .need .name:hover { text-decoration: underline; }
+/* Download tokens, in the title: green when found, gray otherwise. */
+.cprof .tokens { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 3px; }
+.cprof .token { --tone: var(--descrip-text, #999); display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; cursor: pointer;
+  color: var(--tone); border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  background: color-mix(in srgb, var(--tone) 10%, transparent); }
+.cprof .token.ok { --tone: var(--cp-ok); }
+.cprof .token.missing { border-style: dashed; opacity: .8; }
+.cprof .token:hover { opacity: 1; filter: brightness(1.15); }
+.cprof .token i { font-size: 10px; }
+.cprof-dialog .tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.cprof-dialog .tabs button { padding: 3px 10px; font-size: 12px; border-radius: 999px; }
+.cprof-dialog .tabs button.active { border-color: var(--cp-accent); color: var(--input-text, var(--fg-color));
+  background: color-mix(in srgb, var(--cp-accent) 18%, transparent); }
+.cprof-dialog .howto { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.cprof-dialog .howto h4 { margin: 4px 0 0; font-size: 13px; }
+.cprof-dialog .howto p { margin: 0; line-height: 1.45; }
+.cprof-dialog .howto a { color: var(--cp-accent); }
+.cprof-dialog .code { position: relative; }
+.cprof-dialog .code pre { margin: 0; padding: 7px 34px 7px 9px; border-radius: 6px; font-size: 12px;
+  background: var(--comfy-input-bg); border: 1px solid var(--border-color); white-space: pre-wrap;
+  word-break: break-all; }
+.cprof-dialog .code button { position: absolute; top: 4px; right: 4px; }
+.cprof-dialog .state { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-radius: 6px;
+  --tone: var(--cp-warn); border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  background: color-mix(in srgb, var(--tone) 10%, transparent); }
+.cprof-dialog .state.ok { --tone: var(--cp-ok); }
+.cprof-dialog .state > i { color: var(--tone); }
+/* Items on disk outside the profiles. */
+.cprof-dialog .orph-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cprof-dialog .orph-tools input { flex: 1; min-width: 160px; padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--border-color); background: var(--comfy-input-bg); color: var(--input-text, var(--fg-color)); }
+.cprof-dialog .orph-table { overflow: auto; border: 1px solid var(--border-color); border-radius: 6px; min-height: 120px; }
+.cprof-dialog .orph-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cprof-dialog .orph-table th { position: sticky; top: 0; background: var(--comfy-menu-bg, #1e1e1e); text-align: left;
+  padding: 5px 8px; border-bottom: 1px solid var(--border-color); cursor: pointer; white-space: nowrap;
+  user-select: none; font-weight: 600; }
+.cprof-dialog .orph-table th i { font-size: 9px; margin-left: 4px; }
+.cprof-dialog .orph-table td { padding: 4px 8px; border-top: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+  vertical-align: middle; }
+.cprof-dialog .orph-table tr:hover td { background: color-mix(in srgb, var(--cp-accent) 7%, transparent); }
+.cprof-dialog .orph-table td.name { font-family: monospace; word-break: break-all; }
+.cprof-dialog .orph-table td.name i { font-size: 11px; margin-right: 6px; color: var(--descrip-text, #999); }
+.cprof-dialog .orph-table td.num { text-align: right; white-space: nowrap; }
+.cprof-dialog .orph-table td.when { white-space: nowrap; color: var(--descrip-text, #999); }
+.cprof-dialog .orph-table td.act { width: 1px; }
+.cprof-dialog .orph-table tr.group { cursor: pointer; }
+.cprof-dialog .orph-table tr.group td { font-weight: 600;
+  background: color-mix(in srgb, var(--border-color) 18%, transparent); }
+.cprof-dialog .orph-table tr.group td.name i:first-child { width: 10px; }
+.cprof-dialog .orph-table td.name.nested { padding-left: 34px; }
+.cprof-dialog .orph-table td.name.file { padding-left: 62px; color: var(--descrip-text, #999); }
+.cprof-dialog .orph-table tr.folder { cursor: pointer; }
+.cprof-dialog .orph-table .tag { margin-left: 6px; font-family: var(--font-family, sans-serif); }
+.cprof-dialog .orph-table .tag.managed { --tone: var(--cp-info); }
+.cprof-dialog .orph-table .tag.disabled { --tone: var(--cp-warn); }
 /* Dialog over the page (models of the workflow). */
 .cprof-backdrop { position: fixed; inset: 0; z-index: 3000; background: rgb(0 0 0 / .55);
   display: flex; align-items: center; justify-content: center; padding: 16px; }
@@ -710,6 +796,310 @@ async function refreshModelLists() {
   await refreshMissingModels(false);
 }
 
+// Download tokens: the panel only knows whether they are there (see token_sources in
+// __init__.py), never their value.
+const TOKENS = {
+  hf: { short: "HF", name: "Hugging Face", variable: "HF_TOKEN", example: "hf_xxxxxxxxxxxxxxxx",
+        page: "https://huggingface.co/settings/tokens",
+        why: "Needed for gated or private repositories (accepted license, e.g. FLUX.1-dev), and raises the download rate limits." },
+  civitai: { short: "CivitAI", name: "CivitAI", variable: "CIVITAI_TOKEN", example: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+             page: "https://civitai.com/user/account",
+             why: "Needed by most CivitAI downloads (models that require being logged in, early access)." },
+};
+
+function tokenState(key, source) {
+  const { name, variable } = TOKENS[key];
+  return source === "env" ? t("{name} token found ({variable} variable)", { name, variable })
+    : source === "login" ? t("{name} token found (saved by `hf auth login`)", { name })
+    : t("No {name} token: anonymous downloads", { name });
+}
+
+// Platforms, in the order of the tabs; the one ComfyUI runs on is shown first.
+const PLATFORMS = ["linux", "windows", "macos", "docker"];
+
+// Procedure to set a token, for a platform: [title, text, code?] blocks.
+function tokenHowto(key, platform) {
+  const { variable: v, example: x } = TOKENS[key];
+  const steps = {
+    linux: [
+      [t("ComfyUI launched from a terminal"),
+       t("Add the variable to your shell's startup file (~/.bashrc, ~/.zshrc or ~/.profile), then open a new terminal and relaunch ComfyUI from it."),
+       `echo 'export ${v}=${x}' >> ~/.bashrc\nsource ~/.bashrc`],
+      [t("ComfyUI as a systemd service"),
+       t("Add the variable to the [Service] section of the unit, then restart the service."),
+       `sudo systemctl edit comfyui\n#   [Service]\n#   Environment=${v}=${x}\nsudo systemctl daemon-reload && sudo systemctl restart comfyui`],
+    ],
+    windows: [
+      [t("Permanent user variable"),
+       t("In PowerShell or cmd (or Settings › System › About › Advanced system settings › Environment Variables). Only the programs launched afterwards see it: fully quit ComfyUI (Desktop app included) and launch it again."),
+       `setx ${v} "${x}"`],
+      [t("Portable version"),
+       t("Or only for ComfyUI: add this line at the top of run_nvidia_gpu.bat (or run_cpu.bat), before the python line."),
+       `set ${v}=${x}`],
+    ],
+    macos: [
+      [t("ComfyUI launched from a terminal"),
+       t("Add the variable to ~/.zshrc, then open a new terminal and relaunch ComfyUI from it."),
+       `echo 'export ${v}=${x}' >> ~/.zshrc\nsource ~/.zshrc`],
+      [t("ComfyUI Desktop app"),
+       t("Applications opened from the Finder do not read ~/.zshrc: set the variable for the session, then quit the app (⌘Q) and open it again. To be done again after each restart of the Mac."),
+       `launchctl setenv ${v} ${x}`],
+    ],
+    docker: [
+      [t("Docker"),
+       t("Pass the variable to the container (or put it in an .env file given with --env-file, or under environment: in docker-compose.yml), then recreate the container."),
+       `docker run -e ${v}=${x} …`],
+      [t("RunPod"),
+       t("In the pod or template settings, Environment Variables: add {variable}, ideally from a RunPod secret, then restart the pod.", { variable: v }),
+       `${v}={{ RUNPOD_SECRET_${key}_token }}`],
+    ],
+  }[platform];
+  if (key === "hf" && platform !== "docker") {
+    steps.push([t("Hugging Face only: hf auth login"),
+                t("Without any variable: the token is saved in the user's Hugging Face folder, and read by every download. Run it as the user who runs ComfyUI, with ComfyUI's Python environment. No restart needed."),
+                "hf auth login"]);
+  }
+  return steps;
+}
+
+// Items on disk that no profile of the file declares (`orphans`): models (a folder without
+// any file of a profile counts as one item), custom nodes, workflows. Read-only.
+const ORPHAN_KINDS = {
+  model: { label: "Models", icon: "pi-database" },
+  custom_node: { label: "Custom nodes", icon: "pi-code" },
+  workflow: { label: "Workflows", icon: "pi-sitemap" },
+};
+
+let orphanDialog = null;
+
+async function openOrphanDialog() {
+  orphanDialog?.remove();
+  const close = () => { orphanDialog?.remove(); orphanDialog = null; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const summary = el("span", { class: "muted" });
+  const body = el("div", { class: "body" }, el("div", { class: "muted" }, t("Loading…")));
+  const box = el("div", { class: "cprof cprof-dialog", role: "dialog", "aria-modal": "true" },
+    el("div", { class: "head" },
+      el("h3", { style: "flex:1" }, t("On disk, outside the profiles"), " ", summary),
+      iconButton("pi-times", t("Close"), false, close)),
+    body);
+  orphanDialog = el("div", { class: "cprof-backdrop", onmousedown: (e) => { if (e.target === orphanDialog) close(); } }, box);
+  document.body.append(orphanDialog);
+  document.addEventListener("keydown", onKey);
+
+  let items;
+  try {
+    ({ items } = await request("GET", "/orphans"));
+  } catch (e) {
+    body.replaceChildren(el("div", { class: "error" }, e.message));
+    return;
+  }
+  const total = (list) => list.reduce((sum, i) => sum + i.size, 0);
+  summary.textContent = `· ${t("{n} item(s)", { n: items.length })} · ${humanSize(total(items))}`;
+  const view = { kind: Object.keys(ORPHAN_KINDS).find((k) => items.some((i) => i.kind === k)) || "model",
+                 sort: "size", desc: true };
+  const filter = el("input", { type: "search", placeholder: t("Filter…"), oninput: () => draw() });
+  const tabs = el("div", { class: "tabs" });
+  const table = el("div", { class: "orph-table" });
+  const expandAll = el("button", { style: "padding:3px 10px;font-size:12px;border-radius:999px" });
+  const date = (s) => new Date(s * 1000).toLocaleDateString(LANG, { year: "numeric", month: "short", day: "numeric" });
+  const columns = [["name", t("Name")], ["size", t("Size")], ["mtime", t("Modified")]];
+  // Models: grouped by root folder (their type, e.g. loras), folded at first.
+  const opened = new Set();
+  const root = (i) => i.name.split("/")[0];
+  const compare = (a, b) => {
+    const [x, y] = [a[view.sort], b[view.sort]];
+    const order = typeof x === "string" ? x.localeCompare(y, undefined, { sensitivity: "base" }) : x - y;
+    return view.desc ? -order : order;
+  };
+  const copyButton = (path) => ghostButton("pi-copy", t("Copy the path"), false, () => {
+    navigator.clipboard?.writeText(path);
+    toast("info", t("Profiles"), t("Copied."), 2000);
+  });
+  // Files of a root group in a subfolder (next to files of a profile, so not reported as a
+  // whole folder): one folder row per subfolder, holding them as its children.
+  const byFolder = (g) => {
+    const folders = new Map();
+    const result = [];
+    for (const i of g.items) {
+      const rel = i.name.slice(g.name.length + 1);
+      const cut = rel.lastIndexOf("/");
+      if (i.folder || cut < 0) {
+        result.push(i);
+        continue;
+      }
+      const dir = rel.slice(0, cut);
+      let f = folders.get(dir);
+      if (!f) {
+        f = { kind: "model", name: `${g.name}/${dir}`, path: i.path.replace(/[\\/][^\\/]*$/, ""),
+              folder: true, partial: true, size: 0, mtime: 0, files: 0, children: [] };
+        folders.set(dir, f);
+        result.push(f);
+      }
+      f.size += i.size;
+      f.mtime = Math.max(f.mtime, i.mtime);
+      f.files += 1;
+      f.managed ||= i.managed;
+      f.children.push({ name: rel.slice(cut + 1), size: i.size, mtime: i.mtime });
+    }
+    return result;
+  };
+  const join = (dir, name) => `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
+  // Model folder reported whole: its files (children), unfolded on a click on the folder.
+  const itemRow = (i, name = i.name, nested = false, query = "") => {
+    const children = i.children || [];
+    const own = !query || name.toLowerCase().includes(query);
+    const shown = own ? children : children.filter((c) => c.name.toLowerCase().includes(query));
+    const open = children.length > 0 && (opened.has(`f:${i.path}`) || (!!query && !own));
+    const toggle = () => { opened.has(`f:${i.path}`) ? opened.delete(`f:${i.path}`) : opened.add(`f:${i.path}`); draw(); };
+    return [
+      el("tr", { title: i.repo ? `${i.path}\n${i.repo}` : i.path, class: children.length ? "folder" : "",
+                 onclick: children.length ? (e) => { if (!e.target.closest("button")) toggle(); } : null },
+    el("td", { class: `name${nested ? " nested" : ""}` },
+      children.length > 0 && el("i", { class: `pi ${open ? "pi-chevron-down" : "pi-chevron-right"}`, style: "font-size:9px" }),
+      el("i", { class: `pi ${i.folder ? (open ? "pi-folder-open" : "pi-folder") : ORPHAN_KINDS[i.kind].icon}` }), name,
+      i.partial ? el("span", { class: "tag", title: t("The other files of this folder are part of a profile") },
+        t("{n} file(s) outside the profiles", { n: i.files }))
+        : i.folder && i.files > 1 && i.kind === "model" && el("span", { class: "tag" }, t("{n} files", { n: i.files })),
+      i.disabled && el("span", { class: "tag disabled" }, t("disabled")),
+      i.managed && el("span", { class: "tag managed", title: t("Installed by the manager for a profile no longer in the file") },
+        t("installed by the manager"))),
+    el("td", { class: "num" }, humanSize(i.size)),
+    el("td", { class: "when" }, date(i.mtime)),
+    el("td", { class: "act" }, copyButton(i.path))),
+      open && [...shown].sort(compare).map((c) => el("tr", { title: join(i.path, c.name) },
+        el("td", { class: "name file" }, el("i", { class: `pi ${ORPHAN_KINDS.model.icon}` }), c.name),
+        el("td", { class: "num" }, humanSize(c.size)),
+        el("td", { class: "when" }, date(c.mtime)),
+        el("td", { class: "act" }, copyButton(join(i.path, c.name))))),
+      open && i.files > children.length && el("tr", {}, el("td", { class: "name file muted", colspan: 4 },
+        t("… and {n} other file(s)", { n: i.files - children.length }))),
+    ];
+  };
+
+  const draw = () => {
+    tabs.replaceChildren(...Object.entries(ORPHAN_KINDS).map(([kind, { label, icon }]) => {
+      const list = items.filter((i) => i.kind === kind);
+      return el("button", { class: kind === view.kind ? "active" : "", onclick: () => { view.kind = kind; draw(); } },
+        el("i", { class: `pi ${icon}`, style: "font-size:11px;margin-right:6px" }),
+        `${t(label)} (${list.length}${list.length ? ` · ${humanSize(total(list))}` : ""})`);
+    }));
+    const query = filter.value.trim().toLowerCase();
+    const rows = items.filter((i) => i.kind === view.kind && (!query || i.name.toLowerCase().includes(query)
+                                                              || (i.children || []).some((c) => c.name.toLowerCase().includes(query))))
+      .sort(compare);
+    let body;
+    if (view.kind === "model") {
+      // One row per root folder (total size, latest date), sorted like its items; unfolded on
+      // a click, or as long as the filter is used.
+      const groups = new Map();
+      for (const i of rows) {
+        const g = groups.get(root(i)) || { name: root(i), size: 0, mtime: 0, items: [] };
+        g.size += i.size;
+        g.mtime = Math.max(g.mtime, i.mtime);
+        g.items.push(i);
+        groups.set(g.name, g);
+      }
+      for (const g of groups.values()) g.items = byFolder(g).sort(compare);
+      body = [...groups.values()].sort(compare).map((g) => {
+        const open = query || opened.has(g.name);
+        const toggle = () => { opened.has(g.name) ? opened.delete(g.name) : opened.add(g.name); draw(); };
+        return [
+          el("tr", { class: "group", onclick: query ? null : toggle },
+            el("td", { class: "name" },
+              el("i", { class: `pi ${open ? "pi-chevron-down" : "pi-chevron-right"}`, style: "font-size:10px" }),
+              el("i", { class: `pi ${open ? "pi-folder-open" : "pi-folder"}` }), g.name,
+              el("span", { class: "tag" }, t("{n} item(s)", { n: g.items.length }))),
+            el("td", { class: "num" }, humanSize(g.size)),
+            el("td", { class: "when" }, date(g.mtime)),
+            el("td", { class: "act" })),
+          open && g.items.map((i) => itemRow(i, i.name.slice(g.name.length + 1), true, query)),
+        ];
+      });
+    } else {
+      body = rows.map((i) => itemRow(i));
+    }
+    const groupedModels = view.kind === "model";
+    expandAll.style.display = groupedModels && !query ? "" : "none";
+    const allOpen = groupedModels && rows.every((i) => opened.has(root(i)));
+    expandAll.replaceChildren(el("i", { class: `pi ${allOpen ? "pi-minus" : "pi-plus"}`, style: "font-size:10px;margin-right:6px" }),
+      allOpen ? t("Collapse all") : t("Expand all"));
+    expandAll.onclick = () => {
+      if (allOpen) opened.clear();
+      else rows.forEach((i) => opened.add(root(i)));
+      draw();
+    };
+    table.replaceChildren(rows.length ? el("table", {},
+      el("thead", {}, el("tr", {}, columns.map(([key, label]) => el("th", {
+        onclick: () => { view.desc = view.sort === key ? !view.desc : key !== "name"; view.sort = key; draw(); },
+      }, label, view.sort === key && el("i", { class: `pi ${view.desc ? "pi-arrow-down" : "pi-arrow-up"}` }))),
+      el("th", {}))),
+      el("tbody", {}, body)) : el("div", { class: "muted", style: "padding:10px" }, t("Nothing here.")));
+  };
+  draw();
+  body.replaceChildren(
+    el("div", { class: "muted" },
+      t("Items present on disk that no profile of the file declares (all variants included): " +
+        "installed by hand, by ComfyUI-Manager, or by a profile since removed. A model folder " +
+        "without any file of a profile counts as one item: click it to see its files. Nothing " +
+        "is deleted from here.")),
+    el("div", { class: "orph-tools" }, tabs, filter, expandAll),
+    table);
+}
+
+let tokenDialog = null;
+
+function openTokenDialog(key, tokens) {
+  tokenDialog?.remove();
+  const close = () => { tokenDialog?.remove(); tokenDialog = null; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const current = { darwin: "macos", win32: "windows" }[tokens.platform] || "linux";
+  let platform = current;
+  const body = el("div", { class: "body" });
+  const draw = () => {
+    const token = TOKENS[key];
+    const source = tokens[key];
+    const code = (text) => el("div", { class: "code" }, el("pre", {}, text),
+      iconButton("pi-copy", t("Copy"), false, () => {
+        navigator.clipboard?.writeText(text);
+        toast("info", t("Profiles"), t("Copied."), 2000);
+      }));
+    body.replaceChildren(
+      el("div", { class: "tabs" }, Object.entries(TOKENS).map(([k, tk]) => el("button", {
+        class: k === key ? "active" : "", onclick: () => { key = k; draw(); },
+      }, el("i", { class: `pi ${tokens[k] ? "pi-check" : "pi-times"}`, style: "font-size:10px;margin-right:5px" }),
+      tk.name))),
+      el("div", { class: `state${source ? " ok" : ""}` },
+        el("i", { class: `pi ${source ? "pi-check-circle" : "pi-exclamation-circle"}` }),
+        el("span", {}, tokenState(key, source))),
+      el("div", { class: "howto" },
+        el("p", {}, t(token.why)),
+        el("h4", {}, t("1. Create a token")),
+        el("p", {}, t("Create it on:"), " ",
+          el("a", { href: token.page, target: "_blank", rel: "noopener" }, token.page),
+          " ", t("(read access is enough), then copy it.")),
+        el("h4", {}, t("2. Put it in the {variable} variable of ComfyUI's environment", { variable: token.variable })),
+        el("div", { class: "tabs" }, PLATFORMS.map((p) => el("button", {
+          class: p === platform ? "active" : "", onclick: () => { platform = p; draw(); },
+        }, { linux: "Linux", windows: "Windows", macos: "macOS", docker: "Docker / RunPod" }[p],
+        p === current ? " ★" : ""))),
+        tokenHowto(key, platform).map(([title, text, command]) => [
+          el("h4", {}, title), el("p", {}, text), command && code(command)]),
+        el("h4", {}, t("3. Relaunch ComfyUI")),
+        el("p", {}, t("ComfyUI reads its environment when it starts: stop it and launch it again (the panel's Restart button keeps the old environment), then reload this panel. The token is never shown nor stored by the panel."))),
+    );
+  };
+  const box = el("div", { class: "cprof cprof-dialog", role: "dialog", "aria-modal": "true", style: "width:min(720px,100%)" },
+    el("div", { class: "head" },
+      el("h3", { style: "flex:1" }, t("Download tokens")),
+      iconButton("pi-times", t("Close"), false, close)),
+    body);
+  draw();
+  tokenDialog = el("div", { class: "cprof-backdrop", onmousedown: (e) => { if (e.target === tokenDialog) close(); } }, box);
+  document.body.append(tokenDialog);
+  document.addEventListener("keydown", onKey);
+}
+
 let modelDialog = null;
 
 async function openModelDialog() {
@@ -962,6 +1352,16 @@ class ProfilesPanel {
     this.settings = null;       // download settings (`settings`) in settings mode
     this.error = "";
     this.logBox = el("div", { class: "log" });
+    this.showLog = loadSetting(LOG_KEY) === "1";  // log hidden by default
+    // Downloads of the sync (events of the script): step -> { entry, row, samples }, updated in
+    // place, outside render().
+    this.downloads = new Map();
+    this.downloadRows = el("div", { class: "dl-rows" });
+    this.downloadSummary = el("span", { class: "muted" });
+    this.downloadBox = el("div", { class: "downloads", style: "display:none" },
+      el("div", { class: "dl-head" }, el("i", { class: "pi pi-download" }), t("Downloads"),
+        this.downloadSummary),
+      this.downloadRows);
     api.addEventListener(EVENT, (e) => this.onLog(e.detail));
   }
 
@@ -991,6 +1391,60 @@ class ProfilesPanel {
     this.logBox.replaceChildren();
     this.logLines.clear();
     for (const [index, text] of sync.lines || []) this.setLine(index, text);
+    this.downloads.clear();
+    this.downloadRows.replaceChildren();
+    this.updateDownloads(sync.downloads || []);
+  }
+
+  // Entries of the downloads table (see Job.on_event on the server side): row added or updated.
+  updateDownloads(entries) {
+    const now = performance.now();
+    for (const entry of entries) {
+      let d = this.downloads.get(entry.step);
+      if (!d) {
+        const icon = el("i"), name = el("span", { class: "dl-name" }), info = el("span", { class: "dl-info" });
+        const fill = el("div"), bar = el("div", { class: "dl-bar" }, fill);
+        d = { row: el("div", { class: "dl-row" }, icon, name, info, bar), icon, name, info, bar, fill,
+              rate: 0, last: null };
+        this.downloads.set(entry.step, d);
+        this.downloadRows.append(d.row);
+      }
+      // Throughput: smoothed over the successive updates (about one per second).
+      if (d.last && entry.done > d.last.done && now > d.last.time) {
+        const rate = (entry.done - d.last.done) * 1000 / (now - d.last.time);
+        d.rate = d.rate ? d.rate * 0.6 + rate * 0.4 : rate;
+      }
+      d.last = { time: now, done: entry.done };
+      d.entry = entry;
+      const { state, done, total, kind, error } = entry;
+      const percent = state === "done" ? 100 : total ? Math.min(100, done * 100 / total) : 0;
+      d.row.className = `dl-row ${state}`;
+      const sizes = total ? `${humanSize(done)} / ${humanSize(total)}` : done ? humanSize(done) : "";
+      d.row.title = [entry.label, state === "running" && sizes, error].filter(Boolean).join("\n");
+      d.icon.className = `pi ${{ waiting: "pi-clock", running: kind === "check" && !done ? "pi-search" : "pi-download",
+                                 done: "pi-check", failed: "pi-times" }[state] || "pi-clock"}`;
+      d.name.textContent = entry.name;
+      d.fill.style.width = `${percent}%`;
+      d.bar.classList.toggle("busy", state === "running" && !total);
+      d.info.textContent =
+        state === "failed" ? t("failed")
+        : state === "waiting" ? t("waiting")
+        : state === "done" ? (total || done ? humanSize(total || done) : kind === "check" ? t("checked") : "✓")
+        : kind === "check" && !done ? t("checking…")
+        : [total ? `${Math.floor(percent)}%` : humanSize(done),
+           d.rate ? t("{size}/s", { size: humanSize(Math.round(d.rate)) }) : null].filter(Boolean).join(" · ");
+    }
+    // Summary: files done, bytes received over the known totals.
+    const all = [...this.downloads.values()].map((d) => d.entry);
+    const finished = all.filter((e) => e.state === "done").length;
+    const failed = all.filter((e) => e.state === "failed").length;
+    const total = all.reduce((sum, e) => sum + (e.total || 0), 0);
+    const received = all.reduce((sum, e) => sum + (e.state === "done" ? e.total || e.done : e.done), 0);
+    this.downloadSummary.textContent = [
+      t("{done}/{n} done", { done: finished, n: all.length }),
+      failed ? t("{n} failed", { n: failed }) : null,
+      total ? `${humanSize(received)} / ${humanSize(total)}` : null].filter(Boolean).join(" · ");
+    this.downloadBox.style.display = all.length ? "" : "none";
   }
 
   setLine(index, text) {
@@ -1011,6 +1465,10 @@ class ProfilesPanel {
   }
 
   onLog(detail) {
+    if (detail.downloads) {
+      this.updateDownloads(detail.downloads);
+      return;
+    }
     if (!detail.done) {
       if (!this.sync.running) {
         // Sync started from another tab: catch up with it.
@@ -1584,9 +2042,20 @@ class ProfilesPanel {
       el("div", { class: "hero" },
         el("div", { class: "logo" }, el("i", { class: "pi pi-box" })),
         el("div", { class: "title" },
-          el("h3", {}, t("Profiles")),
-          this.data && el("span", { class: "muted" }, t("{n} profiles", { n: count }))),
+          el("div", { style: "display:flex;gap:6px;align-items:baseline" },
+            el("h3", {}, t("Profiles")),
+            this.data && el("span", { class: "muted", title: t("{n} profiles", { n: count }) }, String(count))),
+          this.data?.tokens && el("div", { class: "tokens" },
+          Object.keys(TOKENS).map((key) => {
+            const source = this.data.tokens[key];
+            return el("span", {
+              class: `token ${source ? "ok" : "missing"}`, role: "button",
+              title: `${tokenState(key, source)}\n${t("Click for how to set it")}`,
+              onclick: () => openTokenDialog(key, this.data.tokens),
+            }, el("i", { class: `pi ${source ? "pi-key" : "pi-lock-open"}` }), TOKENS[key].short);
+          }))),
         el("div", { class: "toolbar" },
+          ghostButton("pi-inbox", t("On disk, outside the profiles…"), false, () => openOrphanDialog()),
           ghostButton("pi-refresh", t("Reload"), false, () => this.load()),
           ghostButton("pi-power-off", t("Restart ComfyUI"), locked, () => this.restart()),
           ghostButton("pi-cog", t("Settings"), false, () => this.openSettings()))),
@@ -1747,8 +2216,7 @@ class ProfilesPanel {
               saveSetting(UNMANAGED_KEY, this.unmanagedOnly ? "1" : "0");
               this.render();
             },
-          }, el("i", { class: "pi pi-link" }), t("not managed"), el("span", { class: "count" }, String(unmanaged)))),
-        el("div", { class: "pills" },
+          }, el("i", { class: "pi pi-link" }), t("not managed"), el("span", { class: "count" }, String(unmanaged))),
           this.toggle("namesOnly", NAMES_KEY, "pi-tag", t("Names only"),
             t("Search in profile names only") + "\n" +
             t("The text filter does not search the profiles' items (models, custom nodes…)")),
@@ -1782,8 +2250,20 @@ class ProfilesPanel {
           this.sync.stopping ? t("Stopping…") : t("Stop"))),
       el("div", { class: "muted" },
         t("New models: visible right away. New custom nodes: restart ComfyUI.")),
-      status && el("div", { class: this.sync.returncode ? "error" : "muted" }, status),
-      this.logBox,
+      this.downloadBox,
+      el("div", { class: "logbar" },
+        el("span", { class: `status ${this.sync.returncode ? "error" : "muted"}` }, status),
+        el("button", {
+          title: this.showLog ? t("Hide the log of the actions") : t("Show the log of the actions"),
+          onclick: () => {
+            this.showLog = !this.showLog;
+            saveSetting(LOG_KEY, this.showLog ? "1" : "0");
+            this.render();
+            if (this.showLog) this.logBox.scrollTop = this.logBox.scrollHeight;
+          },
+        }, el("i", { class: `pi ${this.showLog ? "pi-eye-slash" : "pi-align-left"}` }),
+        this.showLog ? t("Hide the log") : t("Show the log"))),
+      this.showLog && this.logBox,
     );
   }
 
@@ -1872,8 +2352,7 @@ class ProfilesPanel {
         el("div", { class: "actions" },
           iconButton("pi-sliders-h", t("Check the workflow's models…"), false, () => openModelDialog()))),
       rows,
-      done ? el("div", { class: "ok" }, t("All the profiles of this workflow are installed."))
-        : toInstall.length > 1 && el("div", { class: "bar" },
+      !done && toInstall.length > 1 && el("div", { class: "bar" },
           el("button", { class: "primary", disabled: locked, onclick: () => this.startSync(false, "sync", toInstall) },
             t("Install the workflow's profiles ({n})", { n: toInstall.length }))));
   }
@@ -2108,6 +2587,7 @@ const GROUPED_KEY = "comfy-profiles.grouped";
 const STATES_KEY = "comfy-profiles.states";
 const UNMANAGED_KEY = "comfy-profiles.unmanagedOnly";
 const FILE_KEY = "comfy-profiles.fileOpen";
+const LOG_KEY = "comfy-profiles.showLog";
 
 // State filters of the legend -> profile states (`list --json`) they show.
 const STATE_FILTERS = {
