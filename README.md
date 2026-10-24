@@ -218,6 +218,12 @@ whose bf16 files are those of `krea2-turbo`) only protects the profile's own ite
 `krea2-turbo[bf16]` can still be uninstalled; and nothing when that profile is the one being
 uninstalled.
 
+When everything left of a profile is still used elsewhere, uninstalling it removes nothing: the
+panel then grays out its uninstall button and names, on hover, the profiles keeping its files
+(e.g. `flux3-klein-common[nvfp4]`, whose files are all those of `[int8]`). It finds out with
+`uninstall --json --each`, which summarizes what uninstalling each profile **alone** would
+remove (number of items, size freed, profiles keeping the rest), in one call.
+
 For `uninstall` to still remove what was already there, **take it over**: `adopt PROFILE`
 (the profile's "link" button in the panel) adds to the manifest everything present for the
 profile, `extends` included. The dependencies of its custom nodes are considered already
@@ -333,7 +339,8 @@ missing message stays in English.
   A profile with variants keeps a single card, with one chip per variant (state color, size,
   ★ for the default variant): the ticked variants are those the card's buttons, and the
   buttons under the list for a checked profile, apply to (`krea2-raw[int8,bf16]`). None is
-  ticked at first: these buttons stay inactive until a variant is. A ticked variant is
+  ticked at first: these buttons then apply to the whole profile, all its variants included
+  (installing, or uninstalling with its common items). A ticked variant is
   outlined, with a download icon if it is not fully installed. Its details group the items by
   variant.
   For a profile that is not fully installed, a blue *… to download* badge gives the size of the
@@ -406,7 +413,7 @@ comfy_profiles.py [--config FILE] list [--json]
 comfy_profiles.py [--config FILE] where                    # file in use and its origin (JSON)
 comfy_profiles.py [--config FILE] show PROFILE[,PROFILE...] [--json]
 comfy_profiles.py [--config FILE] sync [PROFILE[,PROFILE...]] [--update] [--jobs N] [--dry-run]
-comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json]
+comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json [--each]]
 comfy_profiles.py [--config FILE] adopt PROFILE[,PROFILE...] [--dry-run] [--json]
 comfy_profiles.py [--config FILE] sizes [--env FILE] [--force] [--dry-run]
 comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials]   # settings (JSON)

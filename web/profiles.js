@@ -70,8 +70,6 @@ const STYLE = `
 .cprof .actions { display: flex; gap: 3px; }
 .cprof button.primary { background: var(--cp-accent); color: #fff; border-color: transparent; }
 .cprof button.danger { background: var(--cp-err); color: #fff; border-color: transparent; }
-.cprof .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
-.cprof .filter { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .cprof .search { width: 100%; box-sizing: border-box; padding: 5px 8px; border-radius: 6px;
   border: 1px solid var(--border-color); background: var(--comfy-input-bg); color: var(--input-text); }
 .cprof .search:focus { outline: none; border-color: var(--cp-accent); }
@@ -88,14 +86,73 @@ const STYLE = `
   background: linear-gradient(color-mix(in srgb, var(--cp-err) 9%, transparent), color-mix(in srgb, var(--cp-err) 9%, transparent)), var(--cp-surface); }
 .cprof .profile.selected { border-color: var(--cp-accent); border-left-color: var(--state);
   box-shadow: 0 0 0 1px var(--cp-accent); }
-.cprof .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--descrip-text, #999); }
-.cprof .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px;
-  margin-right: 5px; vertical-align: 0; border-radius: 50%; background: var(--border-color); }
-.cprof .legend .state { cursor: pointer; padding: 1px 6px; border-radius: 999px; border: 1px solid transparent; }
-.cprof .legend .state:hover { color: var(--input-text); }
-.cprof .legend .state.active { color: var(--input-text); border-color: var(--cp-accent); }
-.cprof .legend .installed::before { background: var(--cp-ok); }
-.cprof .legend .partial::before { background: var(--cp-partial); }
+/* Top of the panel: title and quick actions, profiles file, filters. */
+.cprof .hero { display: flex; align-items: center; gap: 10px; }
+.cprof .hero .logo { flex: none; width: 34px; height: 34px; border-radius: 9px; display: grid;
+  place-items: center; font-size: 16px; color: var(--cp-accent);
+  background: color-mix(in srgb, var(--cp-accent) 18%, transparent); }
+.cprof .hero .title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cprof .hero h3 { font-size: 16px; line-height: 1.2; }
+.cprof .toolbar { display: flex; gap: 2px; }
+.cprof button.ghost { background: transparent; border-color: transparent; padding: 6px; border-radius: 6px;
+  color: var(--descrip-text, #999); font-size: 13px; line-height: 1; }
+.cprof button.ghost:hover:not(:disabled) { filter: none; color: var(--input-text, var(--fg-color));
+  background: var(--comfy-input-bg); }
+.cprof button.ghost i { font-size: 14px; }
+.cprof .alert { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px;
+  font-size: 12px; --tone: var(--cp-warn); color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent); }
+.cprof .alert.error { --tone: var(--cp-err); white-space: pre-wrap; }
+.cprof .alert i { margin-top: 2px; }
+/* Profiles file: a folding card, path and actions inside. */
+.cprof details.file { border: 1px solid var(--border-color); border-radius: var(--cp-radius);
+  background: var(--cp-surface); }
+.cprof details.file > summary { list-style: none; display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; cursor: pointer; user-select: none; }
+.cprof details.file > summary::-webkit-details-marker { display: none; }
+.cprof details.file > summary:hover { background: var(--comfy-input-bg); border-radius: var(--cp-radius); }
+.cprof details.file > summary .name { font-family: monospace; font-weight: 600; }
+.cprof details.file > summary .spacer { flex: 1; }
+.cprof details.file > summary .chevron { font-size: 11px; color: var(--descrip-text, #999); transition: transform .15s; }
+.cprof details.file[open] > summary .chevron { transform: rotate(90deg); }
+.cprof .file .body { display: flex; flex-direction: column; gap: 8px; padding: 2px 8px 8px; }
+.cprof .file .path { font-family: monospace; font-size: 11px; word-break: break-all;
+  color: var(--descrip-text, #999); }
+.cprof .file .group { display: flex; flex-direction: column; gap: 4px; }
+.cprof .file .group .caption { font-size: 10px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--descrip-text, #999); }
+.cprof .tool { display: inline-flex; align-items: center; gap: 5px; }
+.cprof .tool i { font-size: 11px; }
+.cprof .tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  --tone: var(--descrip-text, #999); color: var(--tone); background: color-mix(in srgb, var(--tone) 15%, transparent); }
+.cprof .tag.user { --tone: var(--cp-ok); }
+.cprof .tag.seed { --tone: var(--cp-warn); }
+.cprof .tag.option, .cprof .tag.env { --tone: var(--cp-info); }
+/* Filters: search field with its icon, state pills with their count, toggles. */
+.cprof .filterbox { display: flex; flex-direction: column; gap: 6px; }
+.cprof .searchbox { position: relative; }
+.cprof .searchbox > i { position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  font-size: 12px; color: var(--descrip-text, #999); pointer-events: none; }
+.cprof .searchbox .search { padding-left: 28px; }
+.cprof .pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.cprof .pill { --tone: var(--border-color); display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; padding: 2px 4px 2px 8px; border-radius: 999px; cursor: pointer; user-select: none;
+  color: var(--descrip-text, #999); border: 1px solid var(--border-color); background: transparent; }
+.cprof .pill:hover { color: var(--input-text, var(--fg-color)); }
+.cprof .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+.cprof .pill .count { min-width: 14px; text-align: center; padding: 0 5px; border-radius: 999px;
+  font-size: 10px; background: var(--comfy-input-bg); color: var(--input-text, var(--fg-color)); }
+.cprof .pill.installed { --tone: var(--cp-ok); }
+.cprof .pill.partial { --tone: var(--cp-partial); }
+.cprof .pill.unmanaged { --tone: var(--cp-warn); border-style: dashed; }
+.cprof .pill.unmanaged i { font-size: 10px; color: var(--cp-warn); }
+.cprof .pill.active { color: var(--input-text, var(--fg-color)); border-style: solid;
+  border-color: var(--cp-accent); background: color-mix(in srgb, var(--cp-accent) 16%, transparent); }
+.cprof .pill.toggle { padding-right: 8px; }
+.cprof .pill.toggle i { font-size: 10px; }
+.cprof .pill.toggle input { display: none; }
+.cprof .pill.clear { border-color: transparent; padding-right: 8px; }
 .cprof .head { display: flex; gap: 8px; align-items: center; }
 .cprof .head label { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; cursor: pointer;
   font-weight: 600; overflow-wrap: anywhere; }
@@ -110,8 +167,6 @@ const STYLE = `
 .cprof .chip.download { --tone: var(--cp-info); }
 .cprof .chip.unmanaged { --tone: var(--cp-warn); border-color: color-mix(in srgb, var(--cp-warn) 45%, transparent);
   border-style: dashed; }
-.cprof .legend .chip.unmanaged.active { border-style: solid; border-color: var(--cp-accent); }
-.cprof .legend .chip::before { display: none; }
 /* Variant chips: dot of the variant's state, ring when ticked. */
 .cprof .chip.variant { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
   border-color: var(--border-color); background: var(--cp-surface); }
@@ -163,6 +218,11 @@ const STYLE = `
   background: color-mix(in srgb, var(--cp-warn) 6%, var(--cp-surface)); }
 .cprof .workflow.done { border-left-color: var(--cp-ok);
   background: color-mix(in srgb, var(--cp-ok) 7%, var(--cp-surface)); }
+.cprof .wf-head { display: flex; gap: 8px; align-items: center; }
+.cprof .wf-head > i { font-size: 14px; color: var(--cp-info); }
+.cprof .workflow.none .wf-head > i { color: var(--cp-warn); }
+.cprof .workflow.done .wf-head > i { color: var(--cp-ok); }
+.cprof .wf-head .title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .cprof .need { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .cprof .need .name { flex: 1; min-width: 0; font-family: monospace; word-break: break-all; cursor: pointer; }
 .cprof .need .name:hover { text-decoration: underline; }
@@ -873,6 +933,10 @@ class ProfilesPanel {
     this.logLines = new Map();  // index -> element
     this.editing = null;        // { path, source, writable, text } in edit mode
     this.uninstall = null;      // { profiles, plan } en attente de confirmation
+    // Card reference -> what uninstalling it alone would remove (`uninstall --each`), checked in
+    // the background for the cards whose state allows uninstalling; emptied at each load.
+    this.removable = new Map();
+    this.checking = new Set();  // references being checked
     this.settings = null;       // download settings (`settings`) in settings mode
     this.error = "";
     this.logBox = el("div", { class: "log" });
@@ -883,6 +947,7 @@ class ProfilesPanel {
     try {
       const [data, sync] = await Promise.all([request("GET", "/profiles"), request("GET", "/sync")]);
       this.data = data;
+      this.removable.clear();
       this.error = "";
       this.setSync(sync);
       for (const name of this.expanded.keys()) this.expand(name, true);
@@ -974,22 +1039,18 @@ class ProfilesPanel {
   }
 
   // Variants ticked on the card of a profile with variants: none until clicked (its actions
-  // then stay inactive).
+  // then apply to the whole profile).
   chosen(name) {
     return this.variants.get(name) ?? new Set();
   }
 
-  // Profile with variants none of which is ticked: nothing for its actions to apply to.
-  unticked(name) {
-    return Boolean(this.data?.profiles[name]?.variants) && !this.chosen(name).size;
-  }
-
-  // What the actions on a profile apply to: name[ticked variants] for a profile with variants
-  // (name[]: its common items only), otherwise its name.
+  // What the actions on a profile apply to: for a profile with variants, name[ticked variants],
+  // or the whole profile (all its variants) when none is ticked; otherwise its name.
   ref(name) {
     const p = this.data?.profiles[name];
     if (!p?.variants) return name;
     const chosen = this.chosen(name);
+    if (!chosen.size) return allVariants(name, p);
     return `${name}[${p.variants.map((v) => v.name).filter((v) => chosen.has(v)).join(",")}]`;
   }
 
@@ -1027,6 +1088,24 @@ class ProfilesPanel {
       this.uninstall = { profiles, plan, withExtends };
     } catch (e) {
       toast("error", t("Profiles"), e.message);
+    }
+    this.render();
+  }
+
+  // What uninstalling each of `refs` alone would remove, in one request; the cards then gray out
+  // the uninstall of those with nothing to remove.
+  async checkRemovable(refs) {
+    refs = refs.filter((r) => !this.removable.has(r) && !this.checking.has(r));
+    if (!refs.length) return;
+    refs.forEach((r) => this.checking.add(r));
+    try {
+      const { plans } = await request("GET", `/uninstall-check?profiles=${encodeURIComponent(refs.join(","))}`);
+      for (const r of refs) this.removable.set(r, plans[r] ?? null);
+    } catch (e) {
+      for (const r of refs) this.removable.set(r, null);  // unknown: the button stays active
+      console.warn("[comfy-profiles]", e);
+    } finally {
+      refs.forEach((r) => this.checking.delete(r));
     }
     this.render();
   }
@@ -1237,9 +1316,10 @@ class ProfilesPanel {
     this.render();
   }
 
-  // Checkbox of a filter, remembered in this browser.
-  toggle(prop, key, label, title) {
-    return el("label", { class: "muted filter", title },
+  // Filter switched on and off by a pill, remembered in this browser.
+  toggle(prop, key, icon, label, title) {
+    return el("label", { class: `pill toggle${this[prop] ? " active" : ""}`, title },
+      el("i", { class: `pi ${this[prop] ? "pi-check" : icon}` }),
       el("input", {
         type: "checkbox", checked: this[prop],
         onchange: (e) => {
@@ -1281,9 +1361,9 @@ class ProfilesPanel {
       plan.remove.length
         ? el("div", {}, t("{n} item(s) removed, {size} freed:",
           { n: plan.remove.length, size: humanSize(plan.freed) }))
-        : el("div", { class: "muted" }, plan.extends.length && !withExtends
+        : el("div", { class: "warn" }, plan.extends.length && !withExtends && !plan.kept.length
           ? t("Nothing of its own to remove: tick “Include the inherited profiles” for a profile that only groups others.")
-          : t("Nothing to remove: everything is missing or still in use.")),
+          : nothingToRemove(plan)),
       el("div", { class: "details" }, plan.remove.map((r) => item(r.kind, r.name, humanSize(r.size)))),
       plan.kept.length > 0 && el("div", { class: "muted" },
         t("Kept, because used by {names}:", { names: plan.keep_profiles.join(", ") })),
@@ -1475,22 +1555,31 @@ class ProfilesPanel {
     );
   }
 
+  // Title, quick actions (reload, restart, settings), and what prevents acting.
+  renderHeader(locked) {
+    const count = this.data && Object.keys(this.data.profiles).length;
+    return el("div", { style: "display:flex;flex-direction:column;gap:8px" },
+      el("div", { class: "hero" },
+        el("div", { class: "logo" }, el("i", { class: "pi pi-box" })),
+        el("div", { class: "title" },
+          el("h3", {}, t("Profiles")),
+          this.data && el("span", { class: "muted" }, t("{n} profiles", { n: count }))),
+        el("div", { class: "toolbar" },
+          ghostButton("pi-refresh", t("Reload"), false, () => this.load()),
+          ghostButton("pi-power-off", t("Restart ComfyUI"), locked, () => this.restart()),
+          ghostButton("pi-cog", t("Settings"), false, () => this.openSettings()))),
+      this.data?.readonly && el("div", { class: "alert" }, el("i", { class: "pi pi-lock" }),
+        el("span", {}, t("Read-only (COMFY_PROFILES_READONLY): only dry-run is possible."))),
+      this.error && el("div", { class: "alert error" }, el("i", { class: "pi pi-exclamation-triangle" }),
+        el("span", {}, this.error)));
+  }
+
   renderMain() {
     const running = this.sync.running;
-    const header = el("div", {},
-      el("div", { class: "head" },
-        el("h3", { style: "flex:1" }, t("Profiles")),
-        iconButton("pi-cog", t("Settings"), false, () => this.openSettings())),
-      this.data && el("div", { class: "muted", title: this.data.config },
-        `${SOURCES[this.data.source] ? t(SOURCES[this.data.source]) : this.data.source} : ${this.data.config}`),
-      this.data?.readonly && el("div", { class: "warn" },
-        t("Read-only (COMFY_PROFILES_READONLY): only dry-run is possible.")),
-      this.error && el("div", { class: "error" }, this.error));
     // Invalid profiles file: it can still be fixed, replaced, or reset to the template.
     if (!this.data) {
-      return el("div", { style: "display:flex;flex-direction:column;gap:10px" }, header,
-        el("div", { class: "bar" }, el("button", { onclick: () => this.load() }, t("Reload"))),
-        this.configBar(running, null));
+      return el("div", { style: "display:flex;flex-direction:column;gap:10px" },
+        this.renderHeader(running), this.renderFile(running, null));
     }
     const locked = running || this.data.readonly;
 
@@ -1516,14 +1605,17 @@ class ProfilesPanel {
       (matches.has(name) && (!this.leavesOnly || !parents.has(name)) && (!states.size || states.has(p.state)) &&
       (!this.unmanagedOnly || p.unmanaged > 0)));
     const hidden = entries.length - shown.length;
+    const toCheck = [];  // card references whose removable items are not known yet
     const profiles = shown.map(([name, p]) => {
       const detail = this.expanded.get(name);
       const label = t((STATES[p.state] || STATES.missing).label);
       // Actions of the card: on the ticked variants for a profile with variants.
       const ref = this.ref(name);
-      const state = STATES[p.variants ? actionState(p, this.chosen(name)) : p.state] || STATES.missing;
-      const untickedHint = t("Tick the variants the card's actions apply to");
-      const none = this.unticked(name);
+      const state = STATES[p.variants ? cardState(p, this.chosen(name)) : p.state] || STATES.missing;
+      // Installed, but nothing of its own to remove: everything left is still used elsewhere.
+      const info = this.removable.get(ref);
+      const nothing = state.uninstall && info?.remove === 0;
+      if (state.uninstall && !this.removable.has(ref)) toCheck.push(ref);
       // Size: per variant, on its chip, for a profile with variants.
       const size = !p.variants && profileSize(p);
       const todo = !p.variants && todoSize(p);
@@ -1544,13 +1636,12 @@ class ProfilesPanel {
               t("Take over the {n} item(s) of {name} already present…", { n: p.unmanaged, name }),
               locked, () => this.adopt(name, p.unmanaged)),
             iconButton("pi-download",
-              none ? untickedHint
-                : state.install ? t("Install {name} (what is missing)", { name: ref }) : `${ref} : ${t(state.label).toLowerCase()}`,
-              locked || none || !state.install, () => this.startSync(false, "sync", [ref])),
+              state.install ? t("Install {name} (what is missing)", { name: ref }) : `${ref} : ${t(state.label).toLowerCase()}`,
+              locked || !state.install, () => this.startSync(false, "sync", [ref])),
             iconButton("pi-trash",
-              none ? untickedHint
+              nothing ? nothingToRemove(info)
                 : state.uninstall ? t("Uninstall {name}…", { name: ref }) : `${ref} : ${t(state.label).toLowerCase()}`,
-              locked || none || !state.uninstall, () => this.prepareUninstall([ref])),
+              locked || !state.uninstall || nothing, () => this.prepareUninstall([ref])),
             iconButton(this.expanded.has(name) ? "pi-chevron-down" : "pi-chevron-right",
               this.expanded.has(name) ? t("Hide details") : t("Show what is installed"),
               false, () => this.expand(name)))),
@@ -1579,9 +1670,10 @@ class ProfilesPanel {
         this.expanded.has(name) && this.renderDetail(detail));
     });
 
+    if (toCheck.length && !locked) setTimeout(() => this.checkRemovable(toCheck));
+
     const selection = [...this.selected].map((n) => this.ref(n));
-    const unticked = [...this.selected].filter((n) => this.unticked(n));
-    const blocked = !selection.length || unticked.length > 0;
+    const blocked = !selection.length;
     const what = actionLabel(this.sync.action, this.sync.force);
     const target = (this.sync.profiles || []).join(", ");
     const last = what.toLowerCase();
@@ -1593,58 +1685,58 @@ class ProfilesPanel {
       : this.sync.returncode === 130 ? t("Last action ({action}): stopped", { action: last })
       : t("Last action ({action}): failed (code {code})", { action: last, code: this.sync.returncode });
 
+    // Number of profiles in each state of the filters, over the whole file.
+    const counts = Object.fromEntries(Object.entries(STATE_FILTERS).map(([key, states]) =>
+      [key, entries.filter(([, p]) => states.includes(p.state)).length]));
+    const unmanaged = entries.filter(([, p]) => p.unmanaged > 0).length;
+    const filtering = query || this.states.size || this.unmanagedOnly;
+
     return el("div", { style: "display:flex;flex-direction:column;gap:10px" },
-      header,
+      this.renderHeader(locked),
       this.renderWorkflow(locked),
-      el("div", { class: "bar" },
-        el("button", { onclick: () => this.load() }, t("Reload")),
-        el("button", {
-          onclick: () => this.startSync(false, "sizes", []), disabled: locked,
-          title: t("Queries Hugging Face / CivitAI / GitHub (without downloading anything) for " +
-                   "files without a size, and saves the size of each profile in profiles.json"),
-        }, t("Recalculate sizes")),
-        el("button", {
-          disabled: locked,
-          onclick: () => confirm(t("Query the source of every file again, even those whose size " +
-                                   "is already known? This may take a while.")) &&
-            this.startSync(false, "sizes", [], false, true),
-          title: t("Like “Recalculate sizes”, but also queries the files whose size is already " +
-                   "known again (after a file changed at the source)"),
-        }, t("Recalculate all")),
-        el("button", { onclick: () => this.restart(), disabled: locked }, t("Restart ComfyUI"))),
-      this.configBar(locked, this.data),
-      el("div", { class: "legend" },
-        // Each state is also a filter: a click adds or removes it (several possible).
-        Object.entries(STATE_FILTERS).map(([key]) => el("span", {
-          class: `state ${key}${this.states.has(key) ? " active" : ""}`,
-          title: this.states.has(key) ? t("Click to stop filtering on this state")
-            : t("Click to show only the profiles in this state"),
-          onclick: () => {
-            this.states.has(key) ? this.states.delete(key) : this.states.add(key);
-            saveSetting(STATES_KEY, [...this.states].join(","));
-            this.render();
-          },
-        }, t({ installed: "installed", partial: "partially installed", missing: "not installed" }[key]))),
-        el("span", {
-          class: `chip unmanaged state${this.unmanagedOnly ? " active" : ""}`,
-          title: `${t(UNMANAGED_HINT)}\n` + (this.unmanagedOnly ? t("Click to stop filtering on this state")
-            : t("Click to show only the profiles with unmanaged items")),
-          onclick: () => {
-            this.unmanagedOnly = !this.unmanagedOnly;
-            saveSetting(UNMANAGED_KEY, this.unmanagedOnly ? "1" : "0");
-            this.render();
-          },
-        }, t("not managed"))),
-      this.search,
-      el("div", { class: "filters" },
-        this.toggle("namesOnly", NAMES_KEY, t("Search in profile names only"),
-          t("The text filter does not search the profiles' items (models, custom nodes…)")),
-        this.toggle("leavesOnly", LEAVES_KEY, t("Show final profiles only"),
-          t("Hides profiles extended by others (e.g. the *-common profiles), installed along with them")),
-        this.leavesOnly && this.toggle("grouped", GROUPED_KEY, t("Also show grouped profiles"),
-          t("Also shows final profiles extended by a group profile (one with no items of its own " +
-            "that only combines other profiles, e.g. minimax-h3-all)")),
-        hidden > 0 && el("span", { class: "muted" }, t("({n} hidden)", { n: hidden }))),
+      this.renderFile(locked, this.data),
+      el("div", { class: "filterbox" },
+        el("div", { class: "searchbox" }, el("i", { class: "pi pi-search" }), this.search),
+        el("div", { class: "pills" },
+          // Each state is also a filter: a click adds or removes it (several possible).
+          Object.entries(STATE_FILTERS).map(([key]) => el("span", {
+            class: `pill ${key}${this.states.has(key) ? " active" : ""}`,
+            title: this.states.has(key) ? t("Click to stop filtering on this state")
+              : t("Click to show only the profiles in this state"),
+            onclick: () => {
+              this.states.has(key) ? this.states.delete(key) : this.states.add(key);
+              saveSetting(STATES_KEY, [...this.states].join(","));
+              this.render();
+            },
+          }, el("span", { class: "dot" }),
+          t({ installed: "installed", partial: "partially installed", missing: "not installed" }[key]),
+          el("span", { class: "count" }, String(counts[key])))),
+          unmanaged > 0 && el("span", {
+            class: `pill unmanaged${this.unmanagedOnly ? " active" : ""}`,
+            title: `${t(UNMANAGED_HINT)}\n` + (this.unmanagedOnly ? t("Click to stop filtering on this state")
+              : t("Click to show only the profiles with unmanaged items")),
+            onclick: () => {
+              this.unmanagedOnly = !this.unmanagedOnly;
+              saveSetting(UNMANAGED_KEY, this.unmanagedOnly ? "1" : "0");
+              this.render();
+            },
+          }, el("i", { class: "pi pi-link" }), t("not managed"), el("span", { class: "count" }, String(unmanaged)))),
+        el("div", { class: "pills" },
+          this.toggle("namesOnly", NAMES_KEY, "pi-tag", t("Names only"),
+            t("Search in profile names only") + "\n" +
+            t("The text filter does not search the profiles' items (models, custom nodes…)")),
+          this.toggle("leavesOnly", LEAVES_KEY, "pi-sitemap", t("Final profiles"),
+            t("Show final profiles only") + "\n" +
+            t("Hides profiles extended by others (e.g. the *-common profiles), installed along with them")),
+          this.leavesOnly && this.toggle("grouped", GROUPED_KEY, "pi-objects-column", t("With groups"),
+            t("Also show grouped profiles") + "\n" +
+            t("Also shows final profiles extended by a group profile (one with no items of its own " +
+              "that only combines other profiles, e.g. minimax-h3-all)")),
+          hidden > 0 && (filtering
+            ? el("span", { class: "pill clear", title: t("Clear the search and the state filters"),
+                           onclick: () => this.clearFilters() },
+              el("i", { class: "pi pi-filter-slash" }), t("({n} hidden)", { n: hidden }))
+            : el("span", { class: "muted", style: "align-self:center" }, t("({n} hidden)", { n: hidden }))))),
       el("div", { class: "list" }, profiles),
       el("div", { class: "bar" },
         el("button", { class: "primary", disabled: locked || blocked,
@@ -1661,8 +1753,6 @@ class ProfilesPanel {
           t("Uninstall…")),
         running && el("button", { class: "danger", disabled: this.sync.stopping, onclick: () => this.stop() },
           this.sync.stopping ? t("Stopping…") : t("Stop"))),
-      unticked.length > 0 && el("div", { class: "warn" },
-        t("Tick at least one variant of: {names}", { names: unticked.join(", ") })),
       el("div", { class: "muted" },
         t("New models: visible right away. New custom nodes: restart ComfyUI.")),
       status && el("div", { class: this.sync.returncode ? "error" : "muted" }, status),
@@ -1686,7 +1776,7 @@ class ProfilesPanel {
           title: [`${name}[${v.name}] : ${state.toLowerCase()}`, isDefault && t("Default variant"),
                   todo, pending ? t("Ticked: installed by the card's sync")
                     : picked ? t("Ticked: already installed")
-                    : t("Tick the variants the card's actions apply to")].filter(Boolean).join("\n"),
+                    : t("Tick to act on this variant only (none ticked: the whole profile)")].filter(Boolean).join("\n"),
         },
           el("input", {
             type: "checkbox", checked: chosen.has(v.name), disabled: running,
@@ -1745,10 +1835,13 @@ class ProfilesPanel {
           }, t("no source"))));
     });
     return el("div", { class: `workflow${done ? " done" : ""}` },
-      el("div", { class: "bar" },
-        el("strong", {}, t("This workflow")),
-        el("span", { class: "muted", style: "flex:1" }, t("profiles declared by its “Workflow profiles” node")),
-        iconButton("pi-sliders-h", t("Check the workflow's models…"), false, () => openModelDialog())),
+      el("div", { class: "wf-head" },
+        el("i", { class: "pi pi-sitemap" }),
+        el("div", { class: "title" },
+          el("strong", {}, t("This workflow")),
+          el("span", { class: "muted" }, t("profiles declared by its “Workflow profiles” node"))),
+        el("div", { class: "actions" },
+          iconButton("pi-sliders-h", t("Check the workflow's models…"), false, () => openModelDialog()))),
       rows,
       done ? el("div", { class: "ok" }, t("All the profiles of this workflow are installed."))
         : toInstall.length > 1 && el("div", { class: "bar" },
@@ -1762,18 +1855,22 @@ class ProfilesPanel {
     const nodes = workflowNodes();
     if (!nodes.all.length) return null;  // empty graph
     const present = nodes.declaring.length > 0;
-    const refs = [...this.selected].map((name) => this.ref(name));
+    // A profile with no variant ticked is declared by its name alone (its default variant).
+    const refs = [...this.selected].map((name) => (this.chosen(name).size ? this.ref(name) : name));
     return el("div", { class: "workflow none" },
-      el("div", { class: "bar" },
-        el("strong", {}, t("This workflow")),
-        el("span", { class: "muted", style: "flex:1" }, present
-          ? t("its “Workflow profiles” node declares no profile yet")
-          : t("declares no profile: no “Workflow profiles” node")),
-        !present && iconButton("pi-plus", refs.length
-          ? t("Add a “Workflow profiles” node declaring the ticked profiles ({names})", { names: refs.join(", ") })
-          : t("Add a “Workflow profiles” node (tick profiles first to fill it in)"),
-          false, () => this.addWorkflowNode(refs)),
-        iconButton("pi-sliders-h", t("Check the workflow's models…"), false, () => openModelDialog())),
+      el("div", { class: "wf-head" },
+        el("i", { class: "pi pi-sitemap" }),
+        el("div", { class: "title" },
+          el("strong", {}, t("This workflow")),
+          el("span", { class: "muted" }, present
+            ? t("its “Workflow profiles” node declares no profile yet")
+            : t("declares no profile: no “Workflow profiles” node"))),
+        el("div", { class: "actions" },
+          !present && iconButton("pi-plus", refs.length
+            ? t("Add a “Workflow profiles” node declaring the ticked profiles ({names})", { names: refs.join(", ") })
+            : t("Add a “Workflow profiles” node (tick profiles first to fill it in)"),
+            false, () => this.addWorkflowNode(refs)),
+          iconButton("pi-sliders-h", t("Check the workflow's models…"), false, () => openModelDialog()))),
       el("div", { class: "muted" }, t("Declaring its profiles lets whoever opens the workflow install what it needs.")));
   }
 
@@ -1802,20 +1899,64 @@ class ProfilesPanel {
     await this.load();
   }
 
+  clearFilters() {
+    this.search.value = "";
+    this.states.clear();
+    this.unmanagedOnly = false;
+    saveSetting(STATES_KEY, "");
+    saveSetting(UNMANAGED_KEY, "0");
+    this.render();
+  }
+
+  // Profiles file: where it is, and what can be done with it (edit, import, export, sizes).
+  // Folded by default (remembered in this browser), unfolded when it is unreadable.
   // `data`: result of `list --json`, or null if the profiles file is unreadable.
-  configBar(locked, data) {
-    return el("div", { class: "bar" },
-      el("span", { class: "muted" }, "profiles.json :"),
-      el("button", { onclick: () => this.edit(), disabled: locked }, t("Edit")),
-      el("button", { onclick: () => this.importFile(), disabled: locked,
-                     title: t("Replaces the profiles file with a file from your computer") }, t("Import…")),
-      el("button", { onclick: () => this.openRemotes(), disabled: locked,
-                     title: t("Replaces the profiles file with the one at a URL") }, t("From a URL…")),
-      el("button", { onclick: () => this.exportFile() }, t("Export")),
-      (!data || data.source === "user") && el("button", {
-        onclick: () => this.resetToSeed(), disabled: locked,
-        title: data ? t("Puts the template back in use ({path})", { path: data.seed }) : t("Puts the template back in use"),
-      }, t("Back to template")));
+  renderFile(locked, data) {
+    const source = data?.source;
+    const tool = (icon, label, attrs) => el("button", { class: "tool", ...attrs },
+      el("i", { class: `pi ${icon}` }), label);
+    return el("details", {
+      class: "file", open: !data || loadSetting(FILE_KEY) === "1",
+      ontoggle: (e) => data && saveSetting(FILE_KEY, e.target.open ? "1" : "0"),
+    },
+      el("summary", { title: data?.config },
+        el("i", { class: "pi pi-file" }),
+        el("span", { class: "name" }, "profiles.json"),
+        source && el("span", { class: `tag ${source}` }, SOURCES[source] ? t(SOURCES[source]) : source),
+        el("span", { class: "spacer" }),
+        el("i", { class: "pi pi-chevron-right chevron" })),
+      el("div", { class: "body" },
+        data && el("div", { class: "path" }, data.config),
+        el("div", { class: "group" },
+          el("span", { class: "caption" }, t("File")),
+          el("div", { class: "bar" },
+            tool("pi-pencil", t("Edit"), { onclick: () => this.edit(), disabled: locked }),
+            tool("pi-upload", t("Import…"), { onclick: () => this.importFile(), disabled: locked,
+              title: t("Replaces the profiles file with a file from your computer") }),
+            tool("pi-globe", t("From a URL…"), { onclick: () => this.openRemotes(), disabled: locked,
+              title: t("Replaces the profiles file with the one at a URL") }),
+            tool("pi-file-export", t("Export"), { onclick: () => this.exportFile() }),
+            (!data || source === "user") && tool("pi-replay", t("Back to template"), {
+              onclick: () => this.resetToSeed(), disabled: locked,
+              title: data ? t("Puts the template back in use ({path})", { path: data.seed })
+                : t("Puts the template back in use"),
+            }))),
+        data && el("div", { class: "group" },
+          el("span", { class: "caption" }, t("File sizes")),
+          el("div", { class: "bar" },
+            tool("pi-calculator", t("Recalculate sizes"), {
+              onclick: () => this.startSync(false, "sizes", []), disabled: locked,
+              title: t("Queries Hugging Face / CivitAI / GitHub (without downloading anything) for " +
+                       "files without a size, and saves the size of each profile in profiles.json"),
+            }),
+            tool("pi-sync", t("Recalculate all"), {
+              disabled: locked,
+              onclick: () => confirm(t("Query the source of every file again, even those whose size " +
+                                       "is already known? This may take a while.")) &&
+                this.startSync(false, "sizes", [], false, true),
+              title: t("Like “Recalculate sizes”, but also queries the files whose size is already " +
+                       "known again (after a file changed at the source)"),
+            })))));
   }
 
   renderDetail(detail) {
@@ -1937,6 +2078,7 @@ const NAMES_KEY = "comfy-profiles.namesOnly";
 const GROUPED_KEY = "comfy-profiles.grouped";
 const STATES_KEY = "comfy-profiles.states";
 const UNMANAGED_KEY = "comfy-profiles.unmanagedOnly";
+const FILE_KEY = "comfy-profiles.fileOpen";
 
 // State filters of the legend -> profile states (`list --json`) they show.
 const STATE_FILTERS = {
@@ -1959,10 +2101,35 @@ function allVariants(name, p) {
 // its common items when none is ticked.
 function actionState(p, chosen) {
   const states = p.variants.filter((v) => chosen.has(v.name)).map((v) => v.state);
-  if (!states.length) return p.common_state;
+  return states.length ? combinedState(states) : p.common_state;
+}
+
+// State of several parts of a profile taken together.
+function combinedState(states) {
   if (states.every((s) => s === "installed")) return "installed";
   if (states.some((s) => s === "installed" || s === "partial")) return "partial";
   return states.every((s) => s === "error") ? "error" : "missing";
+}
+
+// State the card's actions follow: that of the ticked variants, or of the whole profile (all its
+// variants and its common items) when none is ticked.
+function cardState(p, chosen) {
+  if (chosen.size) return actionState(p, chosen);
+  const states = [...p.variants.map((v) => v.state), p.common_state].filter((s) => s && s !== "empty");
+  return states.length ? combinedState(states) : p.common_state;
+}
+
+// Why uninstalling removes nothing, from a plan (or its summary, `uninstall --each`): the
+// profiles still using its files, or files the manager did not install.
+function nothingToRemove(plan) {
+  const keep = plan?.keep_profiles ?? [];
+  const unmanaged = Array.isArray(plan?.unmanaged) ? plan.unmanaged.length : plan?.unmanaged ?? 0;
+  if (keep.length) {
+    const names = keep.slice(0, 4).join(", ") + (keep.length > 4 ? ` (+${keep.length - 4})` : "");
+    return t("Nothing to remove: its files are still used by {names}.", { names });
+  }
+  if (unmanaged) return t("Nothing to remove: its files were not installed by the manager (take them over to remove them).");
+  return t("Nothing to remove: everything is missing or still in use.");
 }
 
 function loadSetting(key) {
@@ -2001,6 +2168,13 @@ const SOURCES = {
 function iconButton(icon, hint, disabled, onclick) {
   return el("button", { class: "icon", title: hint, "aria-label": hint, disabled, onclick },
     el("i", { class: `pi ${icon}` }));
+}
+
+// Same, without a frame until hovered: the quick actions of the panel's title.
+function ghostButton(icon, hint, disabled, onclick) {
+  const button = iconButton(icon, hint, disabled, onclick);
+  button.className = "ghost";
+  return button;
 }
 
 let panel = null;

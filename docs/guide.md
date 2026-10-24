@@ -252,8 +252,10 @@ command line, `COMFY_PROFILES`, `extends`, Workflow profiles node):
 
 In the panel, a profile with variants keeps **one card**, with one chip per variant (its
 state color and its size, ★ for the default variant). Click the chips the card's buttons apply
-to: none is ticked at first, and these buttons stay inactive until you tick one (same for the
-Sync, Dry-run, Update and Uninstall buttons under the list, for a checked profile).
+to. With none ticked (the starting point), they apply to the **whole profile**: all its
+variants are installed, or uninstalled along with its common items. With one or several
+ticked, they only apply to those variants. Same for the Sync, Dry-run, Update and Uninstall
+buttons under the list, for a checked profile.
 
 - solid outline: ticked, and already installed (green dot);
 - **⤓** (blue dashed outline): ticked and not installed yet: the next sync installs it.

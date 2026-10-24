@@ -9,7 +9,7 @@ Usage:
   comfy_profiles.py [--config FILE] where
   comfy_profiles.py [--config FILE] show PROFILE[,PROFILE...] [--json]
   comfy_profiles.py [--config FILE] sync [PROFILE[,PROFILE...]] [--update] [--jobs N] [--dry-run]
-  comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json]
+  comfy_profiles.py [--config FILE] uninstall PROFILE[,PROFILE...] [--with-extends] [--dry-run] [--json [--each]]
   comfy_profiles.py [--config FILE] adopt PROFILE[,PROFILE...] [--dry-run] [--json]
   comfy_profiles.py [--config FILE] sizes [--env FILE] [--force] [--dry-run]
   comfy_profiles.py settings [--set JSON] [--reset] [--clean-partials] [--json]
@@ -2159,12 +2159,30 @@ def plan_uninstall(profiles, names, paths, manifest, with_extends=False):
     }
 
 
+def uninstall_summary(profiles, name, paths, manifest, with_extends):
+    """What uninstalling `name` alone would remove, in short (uninstall --each, for the panel to
+    gray out what has nothing to remove): number of items and bytes freed, profiles keeping the
+    others, number of those left because not installed by the manager. None for an invalid
+    reference."""
+    try:
+        plan = plan_uninstall(profiles, [name], paths, manifest, with_extends)
+    except (ConfigError, SystemExit):
+        return None
+    return {"remove": len(plan["remove"]), "freed": sum(r["size"] for r in plan["remove"]),
+            "keep_profiles": plan["keep_profiles"], "unmanaged": len(plan["unmanaged"]),
+            "startup": plan["startup"]}
+
+
 def cmd_uninstall(profiles, args):
     names = split_names(args.profiles)
     if not names:
         sys.exit("!! " + t("Give at least one profile (see `list`)"))
     paths = Paths()
     manifest = Manifest(paths, profiles)
+    if args.each:
+        print_json({"plans": {name: uninstall_summary(profiles, name, paths, manifest, args.with_extends)
+                              for name in names}})
+        return 0
     try:
         plan = plan_uninstall(profiles, names, paths, manifest, args.with_extends)
     except ConfigError as e:
@@ -2550,6 +2568,8 @@ def main():
     uninstall.add_argument("--with-extends", action="store_true",
                            help=t("also uninstall the profiles they inherit from (extends)"))
     uninstall.add_argument("--json", action="store_true", help=t("JSON output (implies --dry-run)"))
+    uninstall.add_argument("--each", action="store_true",
+                           help=t("with --json: what uninstalling each profile alone would remove, in short"))
     settings = sub.add_parser("settings", help=t("download settings and partial downloads (JSON)"))
     settings.add_argument("--set", metavar="JSON",
                           help=t("settings to save, e.g. '{\"jobs\": 4}' (null: back to the default)"))

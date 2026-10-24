@@ -175,6 +175,13 @@ async def uninstall_plan(request):
     return web.json_response(await cli_json("uninstall", ",".join(names), *extends, request=request))
 
 
+@routes.get(f"{API}/uninstall-check")
+async def uninstall_check(request):
+    """For each profile, what uninstalling it alone would remove, in short (uninstall --each)."""
+    names = profile_names(request.query.get("profiles"), request)
+    return web.json_response(await cli_json("uninstall", ",".join(names), "--each", request=request))
+
+
 @routes.post(f"{API}/adopt")
 @writes
 async def adopt(request):
